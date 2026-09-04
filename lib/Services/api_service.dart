@@ -324,7 +324,7 @@ class ApiService {
         return [];
       }
     } catch (e) {
-      print('Error in fetchAddresses: $e');
+      print('Error in fetchAddresses: ${e.runtimeType}');
       return [];
     }
   }
@@ -337,7 +337,7 @@ class ApiService {
       body: jsonEncode(data),
     );
     if (response.statusCode != 200 && response.statusCode != 201) {
-      print('Address creation error: ${response.statusCode} - ${response.body}');
+      print('Address creation error: ${response.statusCode}');
       throw Exception('Adres eklenemedi: ${response.body}');
     }
 
@@ -348,7 +348,7 @@ class ApiService {
 
     // Şimdi users_address tablosuna ekle
     if (Session.currentUser != null && Session.currentUser!.id != null) {
-      print('Current user: ${Session.currentUser!.id} - ${Session.currentUser!.email}');
+      print('Current user ID: ${Session.currentUser!.id}');
       final userAddressData = {
         'user_id': Session.currentUser!.id,
         'address_id': addressId,
@@ -363,15 +363,14 @@ class ApiService {
         body: jsonEncode(userAddressData),
       );
       print('Response status: ${userAddressResponse.statusCode}');
-      print('Response body: ${userAddressResponse.body}');
       if (userAddressResponse.statusCode != 200 && userAddressResponse.statusCode != 201) {
-        print('Users address creation error: ${userAddressResponse.statusCode} - ${userAddressResponse.body}');
+        print('Users address creation error: ${userAddressResponse.statusCode}');
         throw Exception('Kullanıcı adresi eklenemedi: ${userAddressResponse.body}');
       }
       print('Users address created successfully');
     } else {
       print('Session.currentUser is null or user ID is null!');
-      print('Session.currentUser: ${Session.currentUser}');
+      print('User session present: ${Session.currentUser != null}');
       if (Session.currentUser != null) {
         print('User ID: ${Session.currentUser!.id}');
       }
@@ -416,7 +415,7 @@ class ApiService {
         return [];
       }
     } catch (e) {
-      print('Error in fetchCreditCards: $e');
+      print('Error in fetchCreditCards: ${e.runtimeType}');
       return [];
     }
   }
@@ -537,7 +536,7 @@ class ApiService {
       }
       
       final userOrders = jsonDecode(userOrdersResponse.body) as List;
-      print('All users_orders: $userOrders');
+      print('Users-order records received: ${userOrders.length}');
       
       // Sadece mevcut kullanıcıya ait sipariş ID'lerini filtrele
       final userOrderIds = <int>[];
@@ -563,7 +562,7 @@ class ApiService {
       }
       
       final allOrders = jsonDecode(allOrdersResponse.body) as List;
-      print('All orders: $allOrders');
+      print('Orders received: ${allOrders.length}');
       
       // Sadece kullanıcıya ait siparişleri filtrele
       final userSpecificOrders = <dynamic>[];
@@ -573,12 +572,12 @@ class ApiService {
         }
       }
       
-      print('User specific orders: $userSpecificOrders');
+      print('User orders received: ${userSpecificOrders.length}');
       print('=== FETCH ORDERS SUCCESS ===');
       return userSpecificOrders;
     } catch (e) {
       print('=== FETCH ORDERS ERROR ===');
-      print('Error fetching orders: $e');
+      print('Error fetching orders: ${e.runtimeType}');
       throw Exception('Siparişler alınamadı: $e');
     }
   }
@@ -586,7 +585,7 @@ class ApiService {
   static Future<void> addOrder(Map<String, dynamic> data, {int? cardId, double? amount, List<dynamic>? cartItems}) async {
     try {
       print('=== ADD ORDER START ===');
-      print('Original data: $data');
+      print('Order request received');
       print('Card ID: $cardId, Amount: $amount');
       
       // Order data'ya kart bilgilerini ekle
@@ -597,8 +596,7 @@ class ApiService {
         print('Added card info to order data');
       }
       
-      print('Final order data to send: $orderData');
-      print('JSON to send: ${jsonEncode(orderData)}');
+      print('Order request prepared');
       
       // Backend'e gönder (transaction içinde para çekme ile birlikte)
       final response = await http.post(
@@ -608,7 +606,6 @@ class ApiService {
       );
       
       print('Response status: ${response.statusCode}');
-      print('Response body: ${response.body}');
       
       if (response.statusCode != 200 && response.statusCode != 201) {
         throw Exception('Sipariş eklenemedi');
@@ -636,7 +633,6 @@ class ApiService {
             body: jsonEncode(userOrderData),
           );
           print('Users order response status: ${userOrderResponse.statusCode}');
-          print('Users order response body: ${userOrderResponse.body}');
           
           if (userOrderResponse.statusCode != 200 && userOrderResponse.statusCode != 201) {
             throw Exception('Kullanıcı siparişi eklenemedi: ${userOrderResponse.statusCode} - ${userOrderResponse.body}');
@@ -651,7 +647,7 @@ class ApiService {
       print('=== ADD ORDER SUCCESS ===');
     } catch (e) {
       print('=== ADD ORDER ERROR ===');
-      print('Error adding order: $e');
+      print('Error adding order: ${e.runtimeType}');
       throw Exception('Sipariş eklenemedi: $e');
     }
   }
@@ -808,19 +804,18 @@ class ApiService {
       
       final response = await http.get(Uri.parse('$baseUrl/seller_orders/$sellerId'));
       print('Response status: ${response.statusCode}');
-      print('Response body: ${response.body}');
       
       if (response.statusCode != 200) {
         throw Exception('Satıcı siparişleri alınamadı');
       }
       
       final orders = jsonDecode(response.body) as List;
-      print('Seller orders: $orders');
+      print('Seller orders received: ${orders.length}');
       print('=== FETCH SELLER ORDERS SUCCESS ===');
       return orders;
     } catch (e) {
       print('=== FETCH SELLER ORDERS ERROR ===');
-      print('Error fetching seller orders: $e');
+      print('Error fetching seller orders: ${e.runtimeType}');
       throw Exception('Satıcı siparişleri alınamadı: $e');
     }
   }
@@ -836,7 +831,6 @@ class ApiService {
       );
       
       print('Response status: ${response.statusCode}');
-      print('Response body: ${response.body}');
       
       if (response.statusCode != 200) {
         throw Exception('Sipariş durumu güncellenemedi');
@@ -845,7 +839,7 @@ class ApiService {
       print('=== UPDATE SELLER ORDER STATUS SUCCESS ===');
     } catch (e) {
       print('=== UPDATE SELLER ORDER STATUS ERROR ===');
-      print('Error updating seller order status: $e');
+      print('Error updating seller order status: ${e.runtimeType}');
       throw Exception('Sipariş durumu güncellenemedi: $e');
     }
   }
@@ -858,19 +852,18 @@ class ApiService {
       
       final response = await http.get(Uri.parse('$baseUrl/seller_statistics/$sellerId'));
       print('Response status: ${response.statusCode}');
-      print('Response body: ${response.body}');
       
       if (response.statusCode != 200) {
         throw Exception('Satıcı istatistikleri alınamadı');
       }
       
       final statistics = jsonDecode(response.body) as Map<String, dynamic>;
-      print('Seller statistics: $statistics');
+      print('Seller statistics received');
       print('=== FETCH SELLER STATISTICS SUCCESS ===');
       return statistics;
     } catch (e) {
       print('=== FETCH SELLER STATISTICS ERROR ===');
-      print('Error fetching seller statistics: $e');
+      print('Error fetching seller statistics: ${e.runtimeType}');
       throw Exception('Satıcı istatistikleri alınamadı: $e');
     }
   }
@@ -883,19 +876,18 @@ class ApiService {
       
       final response = await http.get(Uri.parse('$baseUrl/seller_active_orders/$sellerId'));
       print('Response status: ${response.statusCode}');
-      print('Response body: ${response.body}');
       
       if (response.statusCode != 200) {
         throw Exception('Satıcı aktif siparişleri alınamadı');
       }
       
       final orders = jsonDecode(response.body) as List;
-      print('Seller active orders: $orders');
+      print('Active seller orders received: ${orders.length}');
       print('=== FETCH SELLER ACTIVE ORDERS SUCCESS ===');
       return orders;
     } catch (e) {
       print('=== FETCH SELLER ACTIVE ORDERS ERROR ===');
-      print('Error fetching seller active orders: $e');
+      print('Error fetching seller active orders: ${e.runtimeType}');
       throw Exception('Satıcı aktif siparişleri alınamadı: $e');
     }
   }
@@ -910,7 +902,7 @@ class ApiService {
     try {
       print('=== SUBMIT PRODUCT REVIEW START ===');
       print('Submitting review for product ID: $productId, seller ID: $sellerId, rating: $rating');
-      print('Current user: ${Session.currentUser}');
+      print('User session present: ${Session.currentUser != null}');
       print('Current user ID: ${Session.currentUser?.id}');
       
       if (Session.currentUser?.id == null) {
@@ -925,8 +917,7 @@ class ApiService {
         'comment': comment,
       };
       
-      print('Request body: $requestBody');
-      print('JSON body: ${jsonEncode(requestBody)}');
+      print('Review request prepared');
       
       final response = await http.post(
         Uri.parse('$baseUrl/seller_reviews'),
@@ -935,7 +926,6 @@ class ApiService {
       );
       
       print('Response status: ${response.statusCode}');
-      print('Response body: ${response.body}');
       
       if (response.statusCode != 200 && response.statusCode != 201) {
         throw Exception('Ürün değerlendirmesi gönderilemedi: ${response.body}');
@@ -944,7 +934,7 @@ class ApiService {
       print('=== SUBMIT PRODUCT REVIEW SUCCESS ===');
     } catch (e) {
       print('=== SUBMIT PRODUCT REVIEW ERROR ===');
-      print('Error submitting product review: $e');
+      print('Error submitting product review: ${e.runtimeType}');
       throw Exception('Ürün değerlendirmesi gönderilemedi: $e');
     }
   }
@@ -965,7 +955,6 @@ class ApiService {
       final response = await http.get(uri);
       
       print('Response status: ${response.statusCode}');
-      print('Response body: ${response.body}');
       
       if (response.statusCode == 200) {
         final reviews = jsonDecode(response.body) as List;
@@ -976,7 +965,7 @@ class ApiService {
       }
     } catch (e) {
       print('=== GET SELLER REVIEWS ERROR ===');
-      print('Error getting seller reviews: $e');
+      print('Error getting seller reviews: ${e.runtimeType}');
       throw Exception('Değerlendirmeler alınamadı: $e');
     }
   }
@@ -996,7 +985,7 @@ class ApiService {
       return productIds;
     } catch (e) {
       print('=== FETCH USER REVIEWED PRODUCT IDS ERROR ===');
-      print('Error fetching user reviewed product IDs: $e');
+      print('Error fetching user reviewed product IDs: ${e.runtimeType}');
       return [];
     }
   }
@@ -1031,12 +1020,12 @@ class ApiService {
         }
       }
       
-      print('Product reviews with user info: $reviewsWithUserInfo');
+      print('Product reviews received: ${reviewsWithUserInfo.length}');
       print('=== GET PRODUCT REVIEWS SUCCESS ===');
       return reviewsWithUserInfo;
     } catch (e) {
       print('=== GET PRODUCT REVIEWS ERROR ===');
-      print('Error getting product reviews: $e');
+      print('Error getting product reviews: ${e.runtimeType}');
       return [];
     }
   }

@@ -135,8 +135,6 @@ class _PhoneVerificationPageState extends State<PhoneVerificationPage>
     try {
       print('DEBUG: Telefon verification başlatılıyor...');
       print('DEBUG: User type: ${widget.userType}');
-      print('DEBUG: Phone number: ${widget.phoneNumber}');
-      print('DEBUG: Verification code: $verificationCode');
       
       final response = widget.userType == 'seller' 
           ? await SellerApiService.verifySellerPhone(widget.phoneNumber, verificationCode)

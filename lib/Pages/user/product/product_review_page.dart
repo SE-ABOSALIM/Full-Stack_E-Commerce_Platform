@@ -51,7 +51,7 @@ class _ProductReviewPageState extends State<ProductReviewPage> {
         _allReviewed = allReviewed;
       });
     } catch (e) {
-      print('Error checking reviewed products: $e');
+      print('Error checking reviewed products: ${e.runtimeType}');
     }
   }
 

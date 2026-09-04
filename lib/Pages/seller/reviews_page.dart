@@ -131,7 +131,7 @@ class _SellerReviewsPageState extends State<SellerReviewsPage> {
         _averageRatings[productId] = averageRating;
       });
     } catch (e) {
-      print('=== ERROR LOADING REVIEWS: $e ===');
+      print('=== ERROR LOADING REVIEWS: ${e.runtimeType} ===');
       setState(() {
         _productReviews[productId] = [];
         _averageRatings[productId] = 0.0;

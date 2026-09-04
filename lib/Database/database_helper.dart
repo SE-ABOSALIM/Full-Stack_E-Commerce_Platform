@@ -241,7 +241,6 @@ class DatabaseHelper {
   // Kredi kartı ekleme
   Future<int> insertCreditCard(CreditCard card) async {
     print('DatabaseHelper: Kart ekleme işlemi başlatılıyor...');
-    print('DatabaseHelper: Eklenecek kart verisi: ${card.toMap()}');
     
     final db = await database;
     try {
@@ -249,7 +248,7 @@ class DatabaseHelper {
       print('DatabaseHelper: Kart başarıyla eklendi. ID: $id');
       return id;
     } catch (e) {
-      print('DatabaseHelper HATA: Kart eklenirken hata oluştu: $e');
+      print('DatabaseHelper HATA: Kart eklenirken hata oluştu: ${e.runtimeType}');
       return -1;
     }
   }
@@ -285,7 +284,7 @@ class DatabaseHelper {
       print('DatabaseHelper: Kullanıcı-kart ilişkisi başarıyla eklendi. ID: $id');
       return id;
     } catch (e) {
-      print('DatabaseHelper HATA: Kullanıcı-kart ilişkisi eklenirken hata oluştu: $e');
+      print('DatabaseHelper HATA: Kullanıcı-kart ilişkisi eklenirken hata oluştu: ${e.runtimeType}');
       return -1;
     }
   }

@@ -227,7 +227,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
         _isLoading = false;
       });
       
-      print('Login error: $e');
+      print('Login error: ${e.runtimeType}');
       if (e.toString().contains('SocketException') || e.toString().contains('Connection refused')) {
         CustomDialog.showError(
           context: context,

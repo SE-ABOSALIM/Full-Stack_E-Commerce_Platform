@@ -15,10 +15,10 @@ class SellerApiService {
         Uri.parse('$baseUrl/'),
       ).timeout(const Duration(seconds: 10));
       
-      print('Backend status response: ${response.statusCode} - ${response.body}');
+      print('Backend status response: ${response.statusCode}');
       return response.statusCode == 200;
     } catch (e) {
-      print('Backend status check failed: $e');
+      print('Backend status check failed: ${e.runtimeType}');
       return false;
     }
   }
@@ -26,7 +26,7 @@ class SellerApiService {
   // Satıcı Girişi
   static Future<Seller> login(String email, String password) async {
     try {
-      print('Attempting to login with email: $email');
+      print('Seller login attempt started');
       
       final response = await http.post(
         Uri.parse('$baseUrl/sellers/login'),
@@ -38,7 +38,6 @@ class SellerApiService {
       ).timeout(const Duration(seconds: 10));
 
       print('Response status code: ${response.statusCode}');
-      print('Response body: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -48,7 +47,7 @@ class SellerApiService {
         throw Exception(error['detail'] ?? 'Giriş başarısız');
       }
     } catch (e) {
-      print('Login error: $e');
+      print('Login error: ${e.runtimeType}');
       if (e.toString().contains('SocketException') || e.toString().contains('Connection refused')) {
         throw Exception('Sunucuya bağlanılamıyor. Backend çalışıyor mu?');
       }
@@ -164,7 +163,6 @@ class SellerApiService {
     final response = await http.Response.fromStream(streamedResponse);
 
     print('Update profile response status: ${response.statusCode}');
-    print('Update profile response body: ${response.body}');
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
@@ -210,7 +208,7 @@ class SellerApiService {
   // Satıcılar için telefon doğrulama kodu gönder
   static Future<Map<String, dynamic>> sendSellerVerificationCode(String phoneNumber, {String? language}) async {
     try {
-      print('Sending seller verification code to: $phoneNumber');
+      print('Seller verification code request started');
       
       final response = await http.post(
         Uri.parse('$baseUrl/send-seller-verification-code'),
@@ -222,7 +220,6 @@ class SellerApiService {
       ).timeout(const Duration(seconds: 10));
 
       print('Seller verification response status: ${response.statusCode}');
-      print('Seller verification response body: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -232,7 +229,7 @@ class SellerApiService {
         throw Exception(error['detail'] ?? 'Doğrulama kodu gönderilemedi');
       }
     } catch (e) {
-      print('Seller verification error: $e');
+      print('Seller verification error: ${e.runtimeType}');
       if (e.toString().contains('SocketException') || e.toString().contains('Connection refused')) {
         throw Exception('Sunucuya bağlanılamıyor. Backend çalışıyor mu?');
       }
@@ -243,7 +240,7 @@ class SellerApiService {
   // Satıcılar için telefon doğrulama kodunu doğrula
   static Future<Map<String, dynamic>> verifySellerPhone(String phoneNumber, String verificationCode) async {
     try {
-      print('Verifying seller phone: $phoneNumber with code: $verificationCode');
+      print('Seller phone verification submission started');
       
       final response = await http.post(
         Uri.parse('$baseUrl/verify-seller-phone'),
@@ -255,7 +252,6 @@ class SellerApiService {
       ).timeout(const Duration(seconds: 10));
 
       print('Seller phone verification response status: ${response.statusCode}');
-      print('Seller phone verification response body: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -265,7 +261,7 @@ class SellerApiService {
         throw Exception(error['detail'] ?? 'Telefon doğrulanamadı');
       }
     } catch (e) {
-      print('Seller phone verification error: $e');
+      print('Seller phone verification error: ${e.runtimeType}');
       if (e.toString().contains('SocketException') || e.toString().contains('Connection refused')) {
         throw Exception('Sunucuya bağlanılamıyor. Backend çalışıyor mu?');
       }

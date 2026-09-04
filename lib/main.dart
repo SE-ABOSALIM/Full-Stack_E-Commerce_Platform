@@ -19,7 +19,7 @@ void main() async {
     
     runApp(const MyApp());
   } catch (e) {
-    print('Kritik hata: $e');
+    print('Kritik hata: ${e.runtimeType}');
     runApp(const MyApp());
   }
 }

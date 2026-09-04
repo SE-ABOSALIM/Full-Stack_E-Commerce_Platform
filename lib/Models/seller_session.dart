@@ -31,7 +31,7 @@ class SellerSession {
       currentSeller = seller;
       print('Seller session saved: ${seller.storeName}');
     } catch (e) {
-      print('Error saving seller session: $e');
+      print('Error saving seller session: ${e.runtimeType}');
     }
   }
   
@@ -58,7 +58,7 @@ class SellerSession {
         return seller;
       }
     } catch (e) {
-      print('Error loading seller session: $e');
+      print('Error loading seller session: ${e.runtimeType}');
       await clearSellerSession();
     }
     return null;
@@ -72,7 +72,7 @@ class SellerSession {
       currentSeller = null;
       print('Seller session cleared');
     } catch (e) {
-      print('Error clearing seller session: $e');
+      print('Error clearing seller session: ${e.runtimeType}');
     }
   }
 } 

@@ -154,7 +154,7 @@ class _SellerProfilePageState extends State<SellerProfilePage>
         });
       }
     } catch (e) {
-      print('Takip durumu kontrol edilemedi: $e');
+      print('Takip durumu kontrol edilemedi: ${e.runtimeType}');
       // Hata durumunda varsayılan olarak false
       setState(() {
         _isFollowing = false;
@@ -170,7 +170,7 @@ class _SellerProfilePageState extends State<SellerProfilePage>
         _followersCount = response['followers_count'] ?? 0;
       });
     } catch (e) {
-      print('Takipçi sayısı getirilemedi: $e');
+      print('Takipçi sayısı getirilemedi: ${e.runtimeType}');
       // Hata durumunda varsayılan olarak 0
       setState(() {
         _followersCount = 0;
@@ -232,7 +232,7 @@ class _SellerProfilePageState extends State<SellerProfilePage>
         }
       }
     } catch (e) {
-      print('Takip işlemi başarısız: $e');
+      print('Takip işlemi başarısız: ${e.runtimeType}');
       
       // State'i geri al
       setState(() {

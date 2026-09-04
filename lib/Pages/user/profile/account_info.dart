@@ -45,7 +45,6 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
         
         // ID'yi koruyarak güncelle
         final updatedUser = User.fromMap(currentUserData);
-        print('Account info - Updated user: $updatedUser');
         print('Account info - User ID: ${updatedUser.id}');
         
         // Session'ı güncelle
@@ -431,7 +430,7 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
     if (Session.currentUser?.id != null) {
       ApiService.sendUserPhoneVerificationByUserId(Session.currentUser!.id!).catchError((e) {
         // Arka plan hatasını sessizce logla, sayfaya geçişe engel olma
-        debugPrint('sendUserPhoneVerificationByUserId error: $e');
+        debugPrint('sendUserPhoneVerificationByUserId error: ${e.runtimeType}');
       });
     }
 

@@ -59,8 +59,7 @@ class _SellerEditProfilePageState extends State<SellerEditProfilePage> {
     super.initState();
     _emailVerificationController = TextEditingController();
     _currentSeller = widget.seller;
-    print('DEBUG: initState - widget.seller.email: ${widget.seller.email}');
-    print('DEBUG: initState - widget.seller.phone: ${widget.seller.phone}');
+    print('DEBUG: Seller profile initialized');
     _initializeControllers();
   }
 
@@ -76,8 +75,7 @@ class _SellerEditProfilePageState extends State<SellerEditProfilePage> {
     try {
       final updatedSeller = await SellerApiService.getSellerById(_currentSeller.id);
       if (mounted) {
-        print('DEBUG: _refreshSellerData - updatedSeller.email: ${updatedSeller.email}');
-        print('DEBUG: _refreshSellerData - updatedSeller.phone: ${updatedSeller.phone}');
+        print('DEBUG: Seller profile refreshed');
         setState(() {
           _currentSeller = updatedSeller;
           // Controller'ları da güncel verilerle güncelle
@@ -91,7 +89,7 @@ class _SellerEditProfilePageState extends State<SellerEditProfilePage> {
       }
     } catch (e) {
       // Hata durumunda sessizce devam et
-      debugPrint('Seller data refresh error: $e');
+      debugPrint('Seller data refresh error: ${e.runtimeType}');
     }
   }
 
@@ -155,7 +153,6 @@ class _SellerEditProfilePageState extends State<SellerEditProfilePage> {
     });
 
     try {
-      print('DEBUG: Email verification için kullanılan email: ${_currentSeller.email}');
       print('DEBUG: Email verification API çağrısı yapılıyor...');
       await ApiService.sendSellerEmailVerificationCode(_currentSeller.email);
       
@@ -263,7 +260,7 @@ class _SellerEditProfilePageState extends State<SellerEditProfilePage> {
     print('DEBUG: Telefon verification API çağrısı yapılıyor...');
     ApiService.sendSellerPhoneVerificationBySellerId(_currentSeller.id).catchError((e) {
       // Arka plan hatasını sessizce logla, sayfaya geçişe engel olma
-      debugPrint('sendSellerPhoneVerificationBySellerId error: $e');
+      debugPrint('sendSellerPhoneVerificationBySellerId error: ${e.runtimeType}');
     });
 
     final result = await Navigator.push(

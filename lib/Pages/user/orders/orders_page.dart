@@ -34,7 +34,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
 
   Future<void> _loadOrders() async {
     final orders = await ApiService.fetchOrders();
-    print('Raw orders from API: $orders');
+    print('Orders received: ${orders.length}');
     
     // Debug: Delivered siparişleri kontrol et
     for (var order in orders) {
@@ -50,7 +50,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     
     setState(() {
       _orders = orders.map((e) {
-        print('Processing order: $e');
+        print('Processing order');
         return Order.fromMap(e);
       }).toList();
     });

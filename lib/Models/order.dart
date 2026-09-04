@@ -33,7 +33,7 @@ class Order {
   }
 
   factory Order.fromMap(Map<String, dynamic> map) {
-    print('Order.fromMap called with: $map');
+    print('Order.fromMap called');
     print('order_status value: ${map['order_status']}');
     print('order_delivered_date value: ${map['order_delivered_date']}');
     print('order_delivered_date type: ${map['order_delivered_date']?.runtimeType}');

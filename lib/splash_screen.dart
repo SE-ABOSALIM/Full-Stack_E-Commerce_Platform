@@ -59,7 +59,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           final userJson = users.firstWhere((u) => u['email'] == email);
           final user = User.fromMap(userJson);
           Session.currentUser = user;
-          print('User session restored: ${user.nameSurname}');
+          print('User session restored');
         } catch (e) {
           print('User not found in API, clearing session');
           await prefs.remove('user_email');
@@ -67,7 +67,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         }
       }
     } catch (e) {
-      print('Error restoring user session: $e');
+      print('Error restoring user session: ${e.runtimeType}');
       Session.currentUser = null;
     }
   }
@@ -79,7 +79,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         print('Seller session restored: ${seller.storeName}');
       }
     } catch (e) {
-      print('Error restoring seller session: $e');
+      print('Error restoring seller session: ${e.runtimeType}');
       await SellerSession.clearSellerSession();
     }
   }

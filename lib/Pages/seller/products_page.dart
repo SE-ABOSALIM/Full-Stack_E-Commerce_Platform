@@ -72,7 +72,7 @@ class _SellerProductsPageState extends State<SellerProductsPage> {
         return null;
       }
     } catch (e) {
-      print('Upload error: $e');
+      print('Upload error: ${e.runtimeType}');
       return null;
     }
   }
@@ -410,7 +410,7 @@ class _ProductDialogState extends State<_ProductDialog> {
         return null;
       }
     } catch (e) {
-      print('Upload error: $e');
+      print('Upload error: ${e.runtimeType}');
       return null;
     }
   }

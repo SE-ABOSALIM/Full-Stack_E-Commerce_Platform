@@ -65,7 +65,7 @@ class _FollowedSellersPageState extends State<FollowedSellersPage> {
       setState(() {
         _isLoading = false;
       });
-      print('Takip edilen satıcılar yüklenemedi: $e');
+      print('Takip edilen satıcılar yüklenemedi: ${e.runtimeType}');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Hata: $e')),
       );

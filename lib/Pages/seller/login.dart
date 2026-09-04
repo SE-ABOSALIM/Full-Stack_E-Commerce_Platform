@@ -176,7 +176,7 @@ class _SellerLoginPageState extends State<SellerLoginPage> with TickerProviderSt
       
       // Seller session'ına kaydet
       await SellerSession.saveSellerSession(seller);
-      print('Seller session saved: ${seller.name}');
+      print('Seller session saved');
       
       print('Login successful, navigating to dashboard...');
       if (mounted) {
@@ -189,7 +189,7 @@ class _SellerLoginPageState extends State<SellerLoginPage> with TickerProviderSt
         );
       }
     } catch (e) {
-      print('Login error in UI: $e');
+      print('Login error in UI: ${e.runtimeType}');
       if (mounted) {
         CustomDialog.showError(
           context: context,
