@@ -4,7 +4,7 @@ import 'Pages/user/home.dart';
 import 'Models/session.dart';
 import 'Models/User.dart';
 import 'Models/seller_session.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'Services/auth_session.dart';
 import 'Services/api_service.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -48,26 +48,12 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   }
 
   Future<void> _restoreUserSession() async {
+    await AuthSession.load();
+    Session.currentUser = null;
+    if (AuthSession.userToken == null) return;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final email = prefs.getString('user_email');
-      
-      if (email != null && email.isNotEmpty) {
-        // Fetch users from API and find the user with matching email
-        final users = await ApiService.fetchUsers();
-        try {
-          final userJson = users.firstWhere((u) => u['email'] == email);
-          final user = User.fromMap(userJson);
-          Session.currentUser = user;
-          print('User session restored');
-        } catch (e) {
-          print('User not found in API, clearing session');
-          await prefs.remove('user_email');
-          Session.currentUser = null;
-        }
-      }
-    } catch (e) {
-      print('Error restoring user session: ${e.runtimeType}');
+      Session.currentUser = User.fromMap(await ApiService.fetchMyProfile());
+    } catch (_) {
       Session.currentUser = null;
     }
   }

@@ -1,3 +1,5 @@
+import '../Services/auth_session.dart';
+import '../Services/seller_api_service.dart';
 import 'seller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -37,35 +39,21 @@ class SellerSession {
   
   // Load seller session from SharedPreferences
   static Future<Seller?> loadSellerSession() async {
+    await AuthSession.load();
+    currentSeller = null;
+    if (AuthSession.sellerToken == null) return null;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final sellerDataString = prefs.getString('seller_data');
-      
-      if (sellerDataString != null && sellerDataString.isNotEmpty) {
-        final sellerData = jsonDecode(sellerDataString) as Map<String, dynamic>;
-        // Backfill defaults for older stored sessions missing new fields
-        sellerData.putIfAbsent('followers_count', () => 0);
-        sellerData.putIfAbsent('phone_verified', () => 'pending');
-        sellerData.putIfAbsent('email_verified', () => 'pending');
-        
-        // Ensure followers_count is properly typed as int
-        if (sellerData['followers_count'] is String) {
-          sellerData['followers_count'] = int.tryParse(sellerData['followers_count']) ?? 0;
-        }
-        final seller = Seller.fromMap(sellerData);
-        currentSeller = seller;
-        print('Seller session loaded: ${seller.storeName}');
-        return seller;
-      }
-    } catch (e) {
-      print('Error loading seller session: ${e.runtimeType}');
-      await clearSellerSession();
+      final seller = await SellerApiService.getProfile();
+      currentSeller = seller;
+      return seller;
+    } catch (_) {
+      return null;
     }
-    return null;
   }
-  
+
   // Clear seller session from SharedPreferences
   static Future<void> clearSellerSession() async {
+    await AuthSession.clear('seller');
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('seller_data');

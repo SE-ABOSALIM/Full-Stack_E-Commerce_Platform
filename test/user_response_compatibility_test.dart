@@ -1,3 +1,5 @@
+import 'package:ceptevar/Services/auth_session.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
 import 'package:ceptevar/Models/User.dart';
@@ -21,6 +23,7 @@ const userResponse = {
 };
 
 void main() {
+  setUp(() { SharedPreferences.setMockInitialValues({}); AuthSession.userToken = "test-user-token"; });
   tearDown(() => Session.currentUser = null);
 
   test('password-free responses initialize user lists and sessions', () {
@@ -46,18 +49,16 @@ void main() {
       Session.currentUser = User.fromMap(userResponse);
       Map<String, dynamic>? update;
       final client = MockClient((request) async {
-        if (request.method == 'GET' && request.url.path == '/users') {
+        if (request.method == 'GET' && request.url.path == '/users/me') {
           return http.Response(
-            jsonEncode([
-              {
-                ...userResponse,
-                if (cachedPassword.isNotEmpty) 'password': cachedPassword,
-              },
-            ]),
+            jsonEncode({
+              ...userResponse,
+              if (cachedPassword.isNotEmpty) 'password': cachedPassword,
+            }),
             200,
           );
         }
-        if (request.method == 'PUT' && request.url.path == '/users/1') {
+        if (request.method == 'PUT' && request.url.path == '/users/me') {
           update = jsonDecode(request.body) as Map<String, dynamic>;
           return http.Response(jsonEncode(userResponse), 200);
         }

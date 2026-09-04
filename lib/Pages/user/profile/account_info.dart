@@ -5,6 +5,7 @@ import '../../../Services/api_service.dart';
 import '../../../Widgets/custom_dialog.dart';
 import '../../../Utils/language_manager.dart';
 import '../verification/phone_verification_page.dart';
+import '../auth/login.dart';
 
 class AccountInfoPage extends StatefulWidget {
   const AccountInfoPage({super.key});
@@ -20,6 +21,18 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
   bool _isLoading = false;
   bool _showEmailVerificationInput = false;
   late TextEditingController _emailVerificationController;
+  final _currentPasswordController = TextEditingController();
+  final _newPasswordController = TextEditingController();
+  final _passwordAgainController = TextEditingController();
+  bool _isChangingPassword = false;
+  bool _passwordChanged = false;
+  bool _passwordSubmitted = false;
+  final _obscurePasswords = [true, true, true];
+  String? _currentPasswordError;
+  String? _newPasswordError;
+  String? _passwordAgainError;
+
+  bool get _actionsBlocked => _isLoading || _isChangingPassword || _passwordChanged;
 
   @override
   void initState() {
@@ -37,12 +50,9 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
     if (user != null) {
       // Kullanıcı bilgilerini API'den yeniden al
       try {
-        final users = await ApiService.fetchUsers();
-        final currentUserData = users.firstWhere(
-          (u) => u['email'] == user.email,
-          orElse: () => user.toMap(),
-        );
-        
+        final currentUserData = await ApiService.fetchMyProfile();
+        if (!mounted || _passwordChanged) return;
+
         // ID'yi koruyarak güncelle
         final updatedUser = User.fromMap(currentUserData);
         print('Account info - User ID: ${updatedUser.id}');
@@ -57,6 +67,7 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
         
         setState(() {}); // UI'yi güncelle
       } catch (e) {
+        if (!mounted || _passwordChanged) return;
         // API'den alınamazsa mevcut bilgileri kullan
         _nameController.text = user.nameSurname.isNotEmpty ? user.nameSurname : '';
         _emailController.text = user.email.isNotEmpty ? user.email : '';
@@ -75,7 +86,87 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
     _emailController.dispose();
     _phoneController.dispose();
     _emailVerificationController.dispose();
+    _currentPasswordController.dispose();
+    _newPasswordController.dispose();
+    _passwordAgainController.dispose();
     super.dispose();
+  }
+
+  bool _validatePasswords() {
+    setState(() {
+      _passwordSubmitted = true;
+      _currentPasswordError =
+          _currentPasswordController.text.isEmpty
+              ? LanguageManager.translate('Mevcut şifrenizi girin.')
+              : null;
+      _newPasswordError =
+          _newPasswordController.text.length < 8 ||
+                  _newPasswordController.text.length > 1024
+              ? LanguageManager.translate('Şifre 8–1024 karakter olmalıdır.')
+              : null;
+      _passwordAgainError =
+          _passwordAgainController.text.isEmpty
+              ? LanguageManager.translate('Yeni şifrenizi tekrar girin.')
+              : _newPasswordController.text != _passwordAgainController.text
+              ? LanguageManager.translate('Yeni şifreler eşleşmiyor.')
+              : null;
+    });
+    return _currentPasswordError == null &&
+        _newPasswordError == null &&
+        _passwordAgainError == null;
+  }
+
+  Future<void> _changePassword() async {
+    if (_actionsBlocked || !_validatePasswords()) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isChangingPassword = true;
+    });
+    try {
+      await ApiService.changePassword(
+        _currentPasswordController.text,
+        _newPasswordController.text,
+        _passwordAgainController.text,
+      );
+      if (!mounted) return;
+      _currentPasswordController.clear();
+      _newPasswordController.clear();
+      _passwordAgainController.clear();
+      setState(() {
+        _passwordChanged = true;
+        _passwordSubmitted = false;
+      });
+      CustomDialog.showSuccess(
+        context: context,
+        title: LanguageManager.translate('Başarılı!'),
+        message: LanguageManager.translate(
+          'Şifreniz değiştirildi. Yeni şifrenizle yeniden giriş yapın.',
+        ),
+        buttonText: LanguageManager.translate('Giriş Yap'),
+        onButtonPressed:
+            () => Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => const LoginPage()),
+              (_) => false,
+            ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      CustomDialog.showError(
+        context: context,
+        title: LanguageManager.translate('Hata'),
+        message: LanguageManager.translate(
+          'Şifre değiştirilemedi. Mevcut şifrenizi ve oturumunuzu kontrol edin.',
+        ),
+        buttonText: LanguageManager.translate('Tamam'),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isChangingPassword = false;
+        });
+      }
+    }
   }
 
   Future<void> _saveChanges() async {
@@ -452,7 +543,7 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (Session.currentUser == null) {
+    if (Session.currentUser == null && !_passwordChanged) {
       return Scaffold(
         appBar: AppBar(
           title: Text(
@@ -547,7 +638,7 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: _isLoading ? null : _saveChanges,
+                  onPressed: _actionsBlocked ? null : _saveChanges,
                   icon: _isLoading 
                       ? const SizedBox(
                           width: 20,
@@ -571,6 +662,8 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
                   ),
                 ),
               ),
+              const SizedBox(height: 24),
+              _buildPasswordSection(),
             ],
           ),
         ),
@@ -578,7 +671,132 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
     );
   }
 
-  Widget _buildProfileInfoRow(IconData icon, String label, TextEditingController controller) {
+  Widget _buildPasswordSection() {
+    return Card(
+      key: const Key('account-password-section'),
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              LanguageManager.translate('Şifre Değiştir'),
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1877F2),
+                letterSpacing: 0.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              LanguageManager.translate(
+                'Şifrenizi değiştirdikten sonra yeniden giriş yapmanız gerekir.',
+              ),
+              style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+            ),
+            const SizedBox(height: 8),
+            _buildPasswordInput(
+              0,
+              'current-password',
+              'Mevcut Şifre',
+              _currentPasswordController,
+              _currentPasswordError,
+            ),
+            _buildPasswordInput(
+              1,
+              'new-password',
+              'Yeni Şifre',
+              _newPasswordController,
+              _newPasswordError,
+            ),
+            _buildPasswordInput(
+              2,
+              'new-password-again',
+              'Yeni Şifre Tekrar',
+              _passwordAgainController,
+              _passwordAgainError,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              key: const Key('change-password-submit'),
+              onPressed: _actionsBlocked ? null : _changePassword,
+              icon:
+                  _isChangingPassword
+                      ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                      : const Icon(Icons.lock_reset, size: 24),
+              label: Text(
+                LanguageManager.translate(
+                  _isChangingPassword ? 'Kaydediliyor...' : 'Şifreyi Güncelle',
+                ),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1877F2),
+                foregroundColor: Colors.white,
+                elevation: 8,
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                shadowColor: Colors.black45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPasswordInput(
+    int index,
+    String keyName,
+    String label,
+    TextEditingController controller,
+    String? error,
+  ) {
+    return _buildProfileInfoRow(
+      index == 2 ? Icons.lock_person_outlined : Icons.lock_outline,
+      LanguageManager.translate(label),
+      controller,
+      fieldKey: Key(keyName),
+      errorText: error,
+      isPassword: true,
+      obscureText: _obscurePasswords[index],
+      onToggleVisibility:
+          () => setState(() {
+            _obscurePasswords[index] = !_obscurePasswords[index];
+          }),
+      onChanged: (_) {
+        if (_passwordSubmitted) _validatePasswords();
+      },
+    );
+  }
+
+  Widget _buildProfileInfoRow(
+    IconData icon,
+    String label,
+    TextEditingController controller, {
+    Key? fieldKey,
+    String? errorText,
+    bool isPassword = false,
+    bool obscureText = false,
+    VoidCallback? onToggleVisibility,
+    ValueChanged<String>? onChanged,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12.0),
       child: Row(
@@ -600,9 +818,35 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
                 ),
                 const SizedBox(height: 4),
                 TextField(
+                  key: fieldKey,
                   controller: controller,
+                  enabled: !_actionsBlocked,
+                  obscureText: obscureText,
+                  autocorrect: !isPassword,
+                  enableSuggestions: !isPassword,
+                  onChanged: onChanged,
                   decoration: InputDecoration(
                     hintText: label,
+                    errorText: errorText,
+                    errorMaxLines: 2,
+                    suffixIcon:
+                        onToggleVisibility == null
+                            ? null
+                            : IconButton(
+                              tooltip: LanguageManager.translate(
+                                obscureText
+                                    ? 'Şifreyi göster'
+                                    : 'Şifreyi gizle',
+                              ),
+                              onPressed:
+                                  _actionsBlocked ? null : onToggleVisibility,
+                              icon: Icon(
+                                obscureText
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                                color: const Color(0xFF1877F2),
+                              ),
+                            ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide(color: Colors.grey.shade300),
@@ -613,11 +857,17 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFF1877F2), width: 2),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF1877F2),
+                        width: 2,
+                      ),
                     ),
                     filled: true,
                     fillColor: Colors.grey.shade50,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
                   ),
                 ),
               ],
@@ -677,7 +927,7 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
                 if (!isEmailVerified) ...[
                   const SizedBox(height: 8),
                   ElevatedButton.icon(
-                    onPressed: _isLoading ? null : _sendEmailVerificationCode,
+                    onPressed: _actionsBlocked ? null : _sendEmailVerificationCode,
                     icon: _isLoading 
                       ? const SizedBox(
                           width: 16,
@@ -720,7 +970,7 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton(
-                        onPressed: _isLoading ? null : _verifyEmailCode,
+                        onPressed: _actionsBlocked ? null : _verifyEmailCode,
                         child: _isLoading 
                           ? const SizedBox(
                               width: 16,
@@ -797,7 +1047,7 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
                 if (!isPhoneVerified) ...[
                   const SizedBox(height: 8),
                   ElevatedButton.icon(
-                    onPressed: _isLoading ? null : _navigateToPhoneVerification,
+                    onPressed: _actionsBlocked ? null : _navigateToPhoneVerification,
                     icon: const Icon(Icons.phone, size: 16),
                     label: Text(
                       LanguageManager.translate('Telefonu Doğrula'),

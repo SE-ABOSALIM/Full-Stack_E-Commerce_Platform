@@ -1,3 +1,5 @@
+import 'auth_http.dart';
+import 'auth_session.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -11,7 +13,7 @@ class SellerApiService {
   static Future<bool> checkBackendStatus() async {
     try {
       print('Checking backend status at: $baseUrl/');
-      final response = await http.get(
+      final response = await AuthHttp.get(
         Uri.parse('$baseUrl/'),
       ).timeout(const Duration(seconds: 10));
       
@@ -28,7 +30,7 @@ class SellerApiService {
     try {
       print('Seller login attempt started');
       
-      final response = await http.post(
+      final response = await AuthHttp.post(
         Uri.parse('$baseUrl/sellers/login'),
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: Uri(queryParameters: {
@@ -41,6 +43,7 @@ class SellerApiService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        await AuthSession.save('seller', data['access_token'] as String);
         return Seller.fromMap(data);
       } else {
         final error = jsonDecode(response.body);
@@ -94,8 +97,7 @@ class SellerApiService {
       );
     }
 
-    final streamedResponse = await request.send();
-    final response = await http.Response.fromStream(streamedResponse);
+    final response = await AuthHttp.send(request);
 
     if (response.statusCode == 200 || response.statusCode == 201) {
       final data = jsonDecode(response.body);
@@ -107,12 +109,11 @@ class SellerApiService {
   }
 
   // Satıcı Profili Getir
-  static Future<Seller> getProfile(String token) async {
-    final response = await http.get(
+  static Future<Seller> getProfile() async {
+    final response = await AuthHttp.get(
       Uri.parse('$baseUrl/sellers/profile'),
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
       },
     );
 
@@ -159,8 +160,7 @@ class SellerApiService {
       );
     }
 
-    final streamedResponse = await request.send();
-    final response = await http.Response.fromStream(streamedResponse);
+    final response = await AuthHttp.send(request);
 
     print('Update profile response status: ${response.statusCode}');
 
@@ -174,24 +174,11 @@ class SellerApiService {
   }
 
   // Satıcı Çıkışı
-  static Future<void> logout(String token) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/sellers/logout'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-    );
-
-    if (response.statusCode != 200) {
-      final error = jsonDecode(response.body);
-      throw Exception(error['detail'] ?? 'Çıkış başarısız');
-    }
-  }
+  static Future<void> logout() => AuthSession.clear('seller');
 
   // Satıcı Bilgilerini Getir (ID ile)
   static Future<Seller> getSellerById(int sellerId) async {
-    final response = await http.get(
+    final response = await AuthHttp.get(
       Uri.parse('$baseUrl/sellers/$sellerId'),
       headers: {'Content-Type': 'application/json'},
     );
@@ -210,7 +197,7 @@ class SellerApiService {
     try {
       print('Seller verification code request started');
       
-      final response = await http.post(
+      final response = await AuthHttp.post(
         Uri.parse('$baseUrl/send-seller-verification-code'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -242,7 +229,7 @@ class SellerApiService {
     try {
       print('Seller phone verification submission started');
       
-      final response = await http.post(
+      final response = await AuthHttp.post(
         Uri.parse('$baseUrl/verify-seller-phone'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({

@@ -1,14 +1,66 @@
-import 'package:http/http.dart' as http;
+import '../Models/User.dart';
+import 'auth_http.dart';
+import 'auth_session.dart';
 import 'dart:convert';
 import '../Models/session.dart';
 import '../Utils/app_config.dart';
 
 class ApiService {
+  static Future<User> loginUser(String email, String password) async {
+    final response = await AuthHttp.post(
+      Uri.parse('$baseUrl/users/login'),
+      body: {'email': email, 'password': password},
+    );
+    if (response.statusCode != 200) throw Exception('E-posta veya şifre hatalı');
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    await AuthSession.save('user', data['access_token'] as String);
+    final user = User.fromMap(data);
+    Session.currentUser = user;
+    return user;
+  }
+
+  static Future<Map<String, dynamic>> fetchMyProfile() async {
+    final response = await AuthHttp.get(Uri.parse('$baseUrl/users/me'));
+    if (response.statusCode != 200) throw Exception('Lütfen yeniden giriş yapın');
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  static Future<void> changePassword(String currentPassword, String newPassword, String newPasswordAgain) async {
+    final response = await AuthHttp.put(
+      Uri.parse('$baseUrl/users/me/password'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'current_password': currentPassword, 'new_password': newPassword, 'new_password_again': newPasswordAgain}),
+    );
+    if (response.statusCode != 200) throw Exception('Şifre değiştirilemedi; mevcut şifrenizi kontrol edin');
+    await AuthSession.clear('user');
+    Session.currentUser = null;
+  }
+
+  static Future<void> requestPasswordReset(String phoneNumber) async {
+    final response = await AuthHttp.post(
+      Uri.parse('$baseUrl/auth/forgot-password/request'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'phone_number': phoneNumber}),
+    );
+    if (response.statusCode != 200) throw Exception('Doğrulama kodu gönderilemedi');
+  }
+
+  static Future<void> resetPassword(String phoneNumber, String code, String newPassword) async {
+    final response = await AuthHttp.post(
+      Uri.parse('$baseUrl/auth/forgot-password/reset'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'phone_number': phoneNumber, 'verification_code': code, 'new_password': newPassword}),
+    );
+    if (response.statusCode != 200) throw Exception('Kod geçersiz veya süresi dolmuş. Yeni kod isteyin.');
+    await AuthSession.clear('user');
+    Session.currentUser = null;
+  }
+
   static String get baseUrl => AppConfig.baseUrl;
 
   // --- PRODUCT CRUD ---
   static Future<List<dynamic>> fetchProducts() async {
-    final response = await http.get(Uri.parse('$baseUrl/products'));
+    final response = await AuthHttp.get(Uri.parse('$baseUrl/products'));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     } else {
@@ -17,7 +69,7 @@ class ApiService {
   }
 
   static Future<void> addProduct(Map<String, dynamic> data) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/products'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -28,7 +80,7 @@ class ApiService {
   }
 
   static Future<void> updateProduct(int id, Map<String, dynamic> data) async {
-    final response = await http.put(
+    final response = await AuthHttp.put(
       Uri.parse('$baseUrl/products/$id'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -39,7 +91,7 @@ class ApiService {
   }
 
   static Future<void> deleteProduct(int id) async {
-    final response = await http.delete(Uri.parse('$baseUrl/products/$id'));
+    final response = await AuthHttp.delete(Uri.parse('$baseUrl/products/$id'));
     if (response.statusCode != 200) {
       throw Exception('Ürün silinemedi');
     }
@@ -47,7 +99,7 @@ class ApiService {
 
   // Satıcının ürünlerini getir
   static Future<List<dynamic>> fetchSellerProducts(int sellerId) async {
-    final response = await http.get(Uri.parse('$baseUrl/sellers/$sellerId/products'));
+    final response = await AuthHttp.get(Uri.parse('$baseUrl/sellers/$sellerId/products'));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     } else {
@@ -66,7 +118,7 @@ class ApiService {
                       phoneNumber.substring(9, 11);
     }
     
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/send-verification-code'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'phone_number': formattedPhone}),
@@ -90,7 +142,7 @@ class ApiService {
                       phoneNumber.substring(9, 11);
     }
     
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/verify-phone'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -109,7 +161,7 @@ class ApiService {
 
   // --- USER PHONE VERIFICATION (by user id) ---
   static Future<Map<String, dynamic>> sendUserPhoneVerificationByUserId(int userId) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/users/$userId/send-phone-verification'),
       headers: {'Content-Type': 'application/json'},
     );
@@ -123,7 +175,7 @@ class ApiService {
 
   // --- EMAIL VERIFICATION ---
   static Future<Map<String, dynamic>> sendEmailVerificationCode(String email, {String? language}) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/send-email-verification-code'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -141,7 +193,7 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> verifyEmail(String email, String verificationCode) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/verify-email'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -160,7 +212,7 @@ class ApiService {
 
   // --- SELLER EMAIL VERIFICATION ---
   static Future<Map<String, dynamic>> sendSellerEmailVerificationCode(String email, {String? language}) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/send-seller-email-verification-code'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -178,7 +230,7 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> verifySellerEmail(String email, String verificationCode) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/verify-seller-email'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -197,7 +249,7 @@ class ApiService {
 
   // --- SELLER PHONE VERIFICATION (by seller id) ---
   static Future<Map<String, dynamic>> sendSellerPhoneVerificationBySellerId(int sellerId) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/sellers/$sellerId/send-phone-verification'),
       headers: {'Content-Type': 'application/json'},
     );
@@ -211,7 +263,7 @@ class ApiService {
 
   // --- USER CRUD ---
   static Future<List<dynamic>> fetchUsers() async {
-    final response = await http.get(Uri.parse('$baseUrl/users'));
+    final response = await AuthHttp.get(Uri.parse('$baseUrl/users'));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     } else {
@@ -220,7 +272,7 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> registerUser(Map<String, dynamic> data) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/users'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -235,7 +287,7 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> registerSeller(Map<String, dynamic> data) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/sellers/signup'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -249,7 +301,7 @@ class ApiService {
   }
 
   static Future<void> addUser(Map<String, dynamic> data) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/users'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -260,8 +312,8 @@ class ApiService {
   }
 
   static Future<void> updateUser(int id, Map<String, dynamic> data) async {
-    final response = await http.put(
-      Uri.parse('$baseUrl/users/$id'),
+    final response = await AuthHttp.put(
+      Uri.parse('$baseUrl/users/me'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
     );
@@ -271,7 +323,7 @@ class ApiService {
   }
 
   static Future<void> deleteUser(int id) async {
-    final response = await http.delete(Uri.parse('$baseUrl/users/$id'));
+    final response = await AuthHttp.delete(Uri.parse('$baseUrl/users/$id'));
     if (response.statusCode != 200) {
       throw Exception('Kullanıcı silinemedi');
     }
@@ -285,7 +337,7 @@ class ApiService {
 
     try {
       // Önce users_address tablosundan kullanıcının adres ID'lerini al
-      final userAddressesResponse = await http.get(Uri.parse('$baseUrl/users_address'));
+      final userAddressesResponse = await AuthHttp.get(Uri.parse('$baseUrl/users_address'));
       if (userAddressesResponse.statusCode == 200) {
         final userAddresses = jsonDecode(userAddressesResponse.body) as List;
         final userAddressIds = <int>[];
@@ -302,7 +354,7 @@ class ApiService {
         }
 
         // Şimdi bu ID'lere sahip adresleri getir
-        final addressesResponse = await http.get(Uri.parse('$baseUrl/address'));
+        final addressesResponse = await AuthHttp.get(Uri.parse('$baseUrl/address'));
         if (addressesResponse.statusCode == 200) {
           final allAddresses = jsonDecode(addressesResponse.body) as List;
           final userSpecificAddresses = <dynamic>[];
@@ -331,7 +383,7 @@ class ApiService {
 
   static Future<void> addAddress(Map<String, dynamic> data) async {
     // Önce address tablosuna ekle
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/address'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -357,7 +409,7 @@ class ApiService {
       print('User ID type: ${Session.currentUser!.id.runtimeType}, value: ${Session.currentUser!.id}');
       print('Address ID type: ${addressId.runtimeType}, value: $addressId');
 
-      final userAddressResponse = await http.post(
+      final userAddressResponse = await AuthHttp.post(
         Uri.parse('$baseUrl/users_address'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(userAddressData),
@@ -379,7 +431,7 @@ class ApiService {
   }
 
   static Future<void> updateAddress(int id, Map<String, dynamic> data) async {
-    final response = await http.put(
+    final response = await AuthHttp.put(
       Uri.parse('$baseUrl/address/$id'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -390,7 +442,7 @@ class ApiService {
   }
 
   static Future<void> deleteAddress(int id) async {
-    final response = await http.delete(Uri.parse('$baseUrl/address/$id'));
+    final response = await AuthHttp.delete(Uri.parse('$baseUrl/address/$id'));
     if (response.statusCode != 200) {
       throw Exception('Adres silinemedi');
     }
@@ -405,7 +457,7 @@ class ApiService {
 
     try {
       print('Fetching credit cards for user: ${Session.currentUser!.id}');
-      final cardsResponse = await http.get(Uri.parse('$baseUrl/credit_card'));
+      final cardsResponse = await AuthHttp.get(Uri.parse('$baseUrl/credit_card'));
       if (cardsResponse.statusCode == 200) {
         final allCards = jsonDecode(cardsResponse.body) as List;
         final filtered = allCards.where((c) => c['user_id'] == Session.currentUser!.id).toList();
@@ -427,7 +479,7 @@ class ApiService {
       data = Map<String, dynamic>.from(data);
       data['user_id'] = Session.currentUser!.id;
     }
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/credit_card'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -448,7 +500,7 @@ class ApiService {
     required int expireYear,
     required String cvc,
   }) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/tokenize'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -476,7 +528,7 @@ class ApiService {
     int? installment,
     String? basketId,
   }) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/charge'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -497,7 +549,7 @@ class ApiService {
   }
 
   static Future<void> updateCreditCard(int id, Map<String, dynamic> data) async {
-    final response = await http.put(
+    final response = await AuthHttp.put(
       Uri.parse('$baseUrl/credit_card/$id'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -508,7 +560,7 @@ class ApiService {
   }
 
   static Future<void> deleteCreditCard(int id) async {
-    final response = await http.delete(Uri.parse('$baseUrl/credit_card/$id'));
+    final response = await AuthHttp.delete(Uri.parse('$baseUrl/credit_card/$id'));
     if (response.statusCode != 200) {
       throw Exception('Kredi kartı silinemedi');
     }
@@ -528,7 +580,7 @@ class ApiService {
       print('Fetching orders for user ID: ${currentUser.id}');
       
       // Önce kullanıcının sipariş ID'lerini al
-      final userOrdersResponse = await http.get(Uri.parse('$baseUrl/users_order'));
+      final userOrdersResponse = await AuthHttp.get(Uri.parse('$baseUrl/users_order'));
       print('Users order response status: ${userOrdersResponse.statusCode}');
       
       if (userOrdersResponse.statusCode != 200) {
@@ -554,7 +606,7 @@ class ApiService {
       }
       
       // Tüm siparişleri al
-      final allOrdersResponse = await http.get(Uri.parse('$baseUrl/order'));
+      final allOrdersResponse = await AuthHttp.get(Uri.parse('$baseUrl/order'));
       print('All orders response status: ${allOrdersResponse.statusCode}');
       
       if (allOrdersResponse.statusCode != 200) {
@@ -599,7 +651,7 @@ class ApiService {
       print('Order request prepared');
       
       // Backend'e gönder (transaction içinde para çekme ile birlikte)
-      final response = await http.post(
+      final response = await AuthHttp.post(
         Uri.parse('$baseUrl/order'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(orderData),
@@ -627,7 +679,7 @@ class ApiService {
           print('Adding to users_order: $userOrderData');
           print('JSON being sent: ${jsonEncode(userOrderData)}');
 
-          final userOrderResponse = await http.post(
+          final userOrderResponse = await AuthHttp.post(
             Uri.parse('$baseUrl/users_order'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode(userOrderData),
@@ -653,7 +705,7 @@ class ApiService {
   }
 
   static Future<void> updateOrder(int id, Map<String, dynamic> data) async {
-    final response = await http.put(
+    final response = await AuthHttp.put(
       Uri.parse('$baseUrl/order/$id'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -664,7 +716,7 @@ class ApiService {
   }
 
   static Future<void> deleteOrder(int id) async {
-    final response = await http.delete(Uri.parse('$baseUrl/order/$id'));
+    final response = await AuthHttp.delete(Uri.parse('$baseUrl/order/$id'));
     if (response.statusCode != 200) {
       throw Exception('Sipariş silinemedi');
     }
@@ -672,7 +724,7 @@ class ApiService {
 
   // --- USERS_ADDRESS CRUD ---
   static Future<List<dynamic>> fetchUsersAddresses() async {
-    final response = await http.get(Uri.parse('$baseUrl/users_address'));
+    final response = await AuthHttp.get(Uri.parse('$baseUrl/users_address'));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     } else {
@@ -681,7 +733,7 @@ class ApiService {
   }
 
   static Future<void> addUsersAddress(Map<String, dynamic> data) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/users_address'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -692,7 +744,7 @@ class ApiService {
   }
 
   static Future<void> updateUsersAddress(int id, Map<String, dynamic> data) async {
-    final response = await http.put(
+    final response = await AuthHttp.put(
       Uri.parse('$baseUrl/users_address/$id'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -703,7 +755,7 @@ class ApiService {
   }
 
   static Future<void> deleteUsersAddress(int id) async {
-    final response = await http.delete(Uri.parse('$baseUrl/users_address/$id'));
+    final response = await AuthHttp.delete(Uri.parse('$baseUrl/users_address/$id'));
     if (response.statusCode != 200) {
       throw Exception('Kullanıcı-adres ilişkisi silinemedi');
     }
@@ -711,7 +763,7 @@ class ApiService {
 
   // --- USERS_CREDIT_CARD CRUD ---
   static Future<List<dynamic>> fetchUsersCreditCards() async {
-    final response = await http.get(Uri.parse('$baseUrl/users_credit_card'));
+    final response = await AuthHttp.get(Uri.parse('$baseUrl/users_credit_card'));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     } else {
@@ -720,7 +772,7 @@ class ApiService {
   }
 
   static Future<void> addUsersCreditCard(Map<String, dynamic> data) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/users_credit_card'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -731,7 +783,7 @@ class ApiService {
   }
 
   static Future<void> updateUsersCreditCard(int id, Map<String, dynamic> data) async {
-    final response = await http.put(
+    final response = await AuthHttp.put(
       Uri.parse('$baseUrl/users_credit_card/$id'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -742,7 +794,7 @@ class ApiService {
   }
 
   static Future<void> deleteUsersCreditCard(int id) async {
-    final response = await http.delete(Uri.parse('$baseUrl/users_credit_card/$id'));
+    final response = await AuthHttp.delete(Uri.parse('$baseUrl/users_credit_card/$id'));
     if (response.statusCode != 200) {
       throw Exception('Kullanıcı-kredi kartı ilişkisi silinemedi');
     }
@@ -750,7 +802,7 @@ class ApiService {
 
   // --- USERS_ORDER CRUD ---
   static Future<List<dynamic>> fetchUsersOrders() async {
-    final response = await http.get(Uri.parse('$baseUrl/users_order'));
+    final response = await AuthHttp.get(Uri.parse('$baseUrl/users_order'));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     } else {
@@ -759,7 +811,7 @@ class ApiService {
   }
 
   static Future<void> addUsersOrder(Map<String, dynamic> data) async {
-    final response = await http.post(
+    final response = await AuthHttp.post(
       Uri.parse('$baseUrl/users_order'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -770,7 +822,7 @@ class ApiService {
   }
 
   static Future<void> updateUsersOrder(int id, Map<String, dynamic> data) async {
-    final response = await http.put(
+    final response = await AuthHttp.put(
       Uri.parse('$baseUrl/users_order/$id'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -781,7 +833,7 @@ class ApiService {
   }
 
   static Future<void> deleteUsersOrder(int id) async {
-    final response = await http.delete(Uri.parse('$baseUrl/users_order/$id'));
+    final response = await AuthHttp.delete(Uri.parse('$baseUrl/users_order/$id'));
     if (response.statusCode != 200) {
       throw Exception('Kullanıcı-sipariş ilişkisi silinemedi');
     }
@@ -802,7 +854,7 @@ class ApiService {
       print('=== FETCH SELLER ORDERS START ===');
       print('Fetching orders for seller ID: $sellerId');
       
-      final response = await http.get(Uri.parse('$baseUrl/seller_orders/$sellerId'));
+      final response = await AuthHttp.get(Uri.parse('$baseUrl/seller_orders/$sellerId'));
       print('Response status: ${response.statusCode}');
       
       if (response.statusCode != 200) {
@@ -825,7 +877,7 @@ class ApiService {
       print('=== UPDATE SELLER ORDER STATUS START ===');
       print('Updating order $orderId to status: $status');
       
-      final response = await http.put(
+      final response = await AuthHttp.put(
         Uri.parse('$baseUrl/seller_orders/$orderId/status?status=$status'),
         headers: {'Content-Type': 'application/json'},
       );
@@ -850,7 +902,7 @@ class ApiService {
       print('=== FETCH SELLER STATISTICS START ===');
       print('Fetching statistics for seller ID: $sellerId');
       
-      final response = await http.get(Uri.parse('$baseUrl/seller_statistics/$sellerId'));
+      final response = await AuthHttp.get(Uri.parse('$baseUrl/seller_statistics/$sellerId'));
       print('Response status: ${response.statusCode}');
       
       if (response.statusCode != 200) {
@@ -874,7 +926,7 @@ class ApiService {
       print('=== FETCH SELLER ACTIVE ORDERS START ===');
       print('Fetching active orders for seller ID: $sellerId');
       
-      final response = await http.get(Uri.parse('$baseUrl/seller_active_orders/$sellerId'));
+      final response = await AuthHttp.get(Uri.parse('$baseUrl/seller_active_orders/$sellerId'));
       print('Response status: ${response.statusCode}');
       
       if (response.statusCode != 200) {
@@ -919,7 +971,7 @@ class ApiService {
       
       print('Review request prepared');
       
-      final response = await http.post(
+      final response = await AuthHttp.post(
         Uri.parse('$baseUrl/seller_reviews'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(requestBody),
@@ -952,7 +1004,7 @@ class ApiService {
       if (productId != null) queryParams['product_id'] = productId.toString();
       
       final uri = Uri.parse('$baseUrl/seller_reviews').replace(queryParameters: queryParams);
-      final response = await http.get(uri);
+      final response = await AuthHttp.get(uri);
       
       print('Response status: ${response.statusCode}');
       
@@ -1035,7 +1087,7 @@ class ApiService {
   // Satıcıyı takip et
   static Future<Map<String, dynamic>> followSeller(int userId, int sellerId) async {
     try {
-      final response = await http.post(
+      final response = await AuthHttp.post(
         Uri.parse('$baseUrl/users/$userId/follow-seller/$sellerId'),
         headers: {'Content-Type': 'application/json'},
       );
@@ -1054,7 +1106,7 @@ class ApiService {
   // Satıcıyı takipten çıkar
   static Future<Map<String, dynamic>> unfollowSeller(int userId, int sellerId) async {
     try {
-      final response = await http.delete(
+      final response = await AuthHttp.delete(
         Uri.parse('$baseUrl/users/$userId/unfollow-seller/$sellerId'),
         headers: {'Content-Type': 'application/json'},
       );
@@ -1073,7 +1125,7 @@ class ApiService {
   // Kullanıcının takip ettiği satıcıları getir
   static Future<Map<String, dynamic>> getFollowedSellers(int userId) async {
     try {
-      final response = await http.get(
+      final response = await AuthHttp.get(
         Uri.parse('$baseUrl/users/$userId/followed-sellers'),
         headers: {'Content-Type': 'application/json'},
       );
@@ -1092,7 +1144,7 @@ class ApiService {
   // Satıcının takipçi sayısını getir
   static Future<Map<String, dynamic>> getSellerFollowersCount(int sellerId) async {
     try {
-      final response = await http.get(
+      final response = await AuthHttp.get(
         Uri.parse('$baseUrl/sellers/$sellerId/followers-count'),
         headers: {'Content-Type': 'application/json'},
       );
@@ -1111,7 +1163,7 @@ class ApiService {
   // Kullanıcının satıcıyı takip edip etmediğini kontrol et
   static Future<Map<String, dynamic>> checkIfFollowing(int userId, int sellerId) async {
     try {
-      final response = await http.get(
+      final response = await AuthHttp.get(
         Uri.parse('$baseUrl/users/$userId/is-following/$sellerId'),
         headers: {'Content-Type': 'application/json'},
       );
@@ -1126,4 +1178,4 @@ class ApiService {
       throw Exception('Takip durumu kontrol edilemedi: $e');
     }
   }
-} 
+}

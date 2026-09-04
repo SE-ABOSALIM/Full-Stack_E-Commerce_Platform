@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../../../Services/auth_session.dart';
 import 'account_info.dart';
 import 'favorites_page.dart';
 import 'my_addresses.dart';
@@ -16,9 +16,8 @@ class ProfileContent extends StatelessWidget {
   const ProfileContent({super.key});
 
   Future<void> _logout(BuildContext context) async {
-    final prefs = await SharedPreferences.getInstance();
     await CartManager.clearCart();
-    await prefs.remove('user_email');
+    await AuthSession.clear('user');
     Session.currentUser = null;
     Navigator.pushAndRemoveUntil(
       context,

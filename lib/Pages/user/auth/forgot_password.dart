@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'login.dart';
-import '../../../Models/User.dart';
 import '../../../Services/api_service.dart';
 import '../../../Widgets/custom_dialog.dart';
 import '../../../Utils/language_manager.dart';
@@ -15,7 +14,7 @@ class ForgotPasswordTheme {
   static const Color lightGreyColor = Color(0xFFE9ECEF);
   static const Color errorColor = Color(0xFFDC3545);
   static const Color successColor = Color(0xFF28A745);
-  
+
   static const TextStyle titleStyle = TextStyle(
     fontSize: 28,
     fontWeight: FontWeight.bold,
@@ -51,269 +50,141 @@ class ForgotPasswordPage extends StatefulWidget {
   State<ForgotPasswordPage> createState() => _ForgotPasswordPageState();
 }
 
-class _ForgotPasswordPageState extends State<ForgotPasswordPage> with TickerProviderStateMixin {
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _phoneController = TextEditingController();
-  final TextEditingController _newPasswordController = TextEditingController();
-  bool _isLoading = false;
+class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
+  final _phone = TextEditingController();
+  final _code = TextEditingController();
+  final _password = TextEditingController();
+  final _phoneFocus = FocusNode();
+  final _codeFocus = FocusNode();
+  final _passwordFocus = FocusNode();
+  bool _codeSent = false;
+  bool _busy = false;
+  bool _sendingCode = false;
   bool _obscurePassword = true;
-  
-  // Focus nodes for validation
-  final FocusNode _nameFocusNode = FocusNode();
-  final FocusNode _emailFocusNode = FocusNode();
-  final FocusNode _phoneFocusNode = FocusNode();
-  final FocusNode _passwordFocusNode = FocusNode();
-  
-  // Form validation states
-  bool _isNameValid = true;
-  bool _isEmailValid = true;
-  bool _isPasswordValid = true;
-  bool _isPhoneValid = true;
-  
-  // Animation controllers
-  late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
-  late Animation<Offset> _slideAnimation;
+  String? _message;
+  String? _phoneError;
+  String? _codeError;
+  String? _passwordError;
 
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
-      vsync: this,
+    for (final focus in [_phoneFocus, _codeFocus, _passwordFocus]) {
+      focus.addListener(() {
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
+  void _showError(String message) {
+    CustomDialog.showError(
+      context: context,
+      title: LanguageManager.translate('Hata'),
+      message: LanguageManager.translate(message),
+      buttonText: LanguageManager.translate('Tamam'),
     );
-    
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeInOut,
-    ));
-    
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.3),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeOutCubic,
-    ));
-    
-    _animationController.forward();
-    
-    // Add focus listeners for validation
-    _nameFocusNode.addListener(_onNameFocusChange);
-    _emailFocusNode.addListener(_onEmailFocusChange);
-    _phoneFocusNode.addListener(_onPhoneFocusChange);
-    _passwordFocusNode.addListener(_onPasswordFocusChange);
-
   }
 
-  bool _isValidEmail(String email) {
-    final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}');
-    return emailRegex.hasMatch(email);
-  }
-
-  bool _isValidPassword(String password) {
-    final passwordRegex = RegExp(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}');
-    return passwordRegex.hasMatch(password);
-  }
-
-  bool _isValidPhone(String phone) {
-    final digitsOnly = phone.replaceAll(RegExp(r'\D'), '');
-    return digitsOnly.length == 11;
-  }
-
-  void _onNameFocusChange() {
-    if (!_nameFocusNode.hasFocus && _nameController.text.trim().isNotEmpty) {
+  Future<void> _requestCode() async {
+    if (_phone.text.trim().isEmpty) {
       setState(() {
-        _isNameValid = _nameController.text.trim().length >= 2;
+        _phoneError = LanguageManager.translate('Telefon numaranızı girin.');
       });
-    } else if (_nameFocusNode.hasFocus) {
-      setState(() {
-        _isNameValid = true;
-      });
-    }
-  }
-
-  void _onEmailFocusChange() {
-    if (!_emailFocusNode.hasFocus && _emailController.text.trim().isNotEmpty) {
-      setState(() {
-        _isEmailValid = _isValidEmail(_emailController.text.trim());
-      });
-    } else if (_emailFocusNode.hasFocus) {
-      setState(() {
-        _isEmailValid = true;
-      });
-    }
-  }
-
-  void _onPhoneFocusChange() {
-    if (!_phoneFocusNode.hasFocus && _phoneController.text.trim().isNotEmpty) {
-      setState(() {
-        _isPhoneValid = _isValidPhone(_phoneController.text.trim());
-      });
-    } else if (_phoneFocusNode.hasFocus) {
-      setState(() {
-        _isPhoneValid = true;
-      });
-    }
-  }
-
-  void _onPasswordFocusChange() {
-    if (!_passwordFocusNode.hasFocus && _newPasswordController.text.isNotEmpty) {
-      setState(() {
-        _isPasswordValid = _isValidPassword(_newPasswordController.text);
-      });
-    } else if (_passwordFocusNode.hasFocus) {
-      setState(() {
-        _isPasswordValid = true;
-      });
-    }
-  }
-
-  bool _isFormValid() {
-    return _isNameValid && _isEmailValid && _isPasswordValid && _isPhoneValid &&
-           _nameController.text.trim().isNotEmpty &&
-           _emailController.text.trim().isNotEmpty &&
-           _newPasswordController.text.isNotEmpty &&
-           _phoneController.text.trim().isNotEmpty;
-  }
-
-  void _handleResetPassword() async {
-    if (!_isFormValid()) {
-      CustomDialog.showError(
-        context: context,
-        title: LanguageManager.translate('Form Hatası'),
-        message: LanguageManager.translate('Lütfen tüm alanları doğru şekilde doldurunuz!'),
-        buttonText: LanguageManager.translate('Tamam'),
-      );
       return;
     }
-
-    if (!_isValidEmail(_emailController.text.trim())) {
-      CustomDialog.showError(
-        context: context,
-        title: LanguageManager.translate('Hata'),
-        message: LanguageManager.translate('Geçerli bir e-posta adresi giriniz!'),
-        buttonText: LanguageManager.translate('Tamam'),
-      );
-      return;
-    }
-
-    if (!_isValidPassword(_newPasswordController.text)) {
-      CustomDialog.showError(
-        context: context,
-        title: LanguageManager.translate('Hata'),
-        message: LanguageManager.translate('Şifre en az 8 karakter, bir büyük harf, bir küçük harf ve bir rakam içermelidir!'),
-        buttonText: LanguageManager.translate('Tamam'),
-      );
-      return;
-    }
-
-    if (!_isValidPhone(_phoneController.text.trim())) {
-      CustomDialog.showError(
-        context: context,
-        title: LanguageManager.translate('Hata'),
-        message: LanguageManager.translate('Telefon numarası 11 haneli olmalıdır!'),
-        buttonText: LanguageManager.translate('Tamam'),
-      );
-      return;
-    }
-
+    FocusScope.of(context).unfocus();
     setState(() {
-      _isLoading = true;
+      _busy = true;
+      _sendingCode = true;
+      _phoneError = null;
+      _message = null;
     });
-
     try {
-      final users = await ApiService.fetchUsers();
-      final userJson = users.firstWhere(
-        (u) => u['email'] == _emailController.text.trim(),
-        orElse: () => null,
-      );
-      
-      if (userJson != null &&
-          userJson['name_surname'] == _nameController.text.trim() &&
-          userJson['phone_number'] == _phoneController.text.trim()) {
-        // Bilgiler doğru, şifreyi güncelle
-        final updatedUser = User(
-          id: userJson['id'],
-          nameSurname: userJson['name_surname'],
-          password: _newPasswordController.text,
-          email: userJson['email'],
-          phoneNumber: userJson['phone_number'],
-        );
-        await ApiService.updateUser(updatedUser.id!, {
-          'name_surname': updatedUser.nameSurname,
-          'password': updatedUser.password,
-          'email': updatedUser.email,
-          'phone_number': updatedUser.phoneNumber,
-        });
-        
-        setState(() {
-          _isLoading = false;
-        });
-        
-        CustomDialog.showSuccess(
-          context: context,
-          title: LanguageManager.translate('Başarılı!'),
-          message: LanguageManager.translate('Şifreniz başarıyla değiştirildi. Yeni şifrenizle giriş yapabilirsiniz.'),
-          buttonText: LanguageManager.translate('Giriş Yap'),
-          onButtonPressed: () {
-            Navigator.pushReplacement(
-              context,
-              PageRouteBuilder(
-                pageBuilder: (context, animation, secondaryAnimation) => const LoginPage(),
-                transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                  return SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(-1, 0),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: child,
-                  );
-                },
-                transitionDuration: const Duration(milliseconds: 300),
-              ),
-            );
-          },
-        );
-      } else {
-        setState(() {
-          _isLoading = false;
-        });
-        CustomDialog.showError(
-          context: context,
-          title: LanguageManager.translate('Hata'),
-          message: LanguageManager.translate('Bilgiler eşleşmiyor! Lütfen girdiğiniz bilgileri kontrol edin.'),
-          buttonText: LanguageManager.translate('Tamam'),
+      await ApiService.requestPasswordReset(_phone.text.trim());
+      if (!mounted) return;
+      setState(() {
+        _codeSent = true;
+        _message =
+            'Hesap bulunursa telefonunuza kod gönderilir. Kod 5 dakika geçerlidir. Yeni kod istemeden önce 60 saniye bekleyin.';
+      });
+    } catch (_) {
+      if (mounted) {
+        _showError(
+          'Kod gönderilemedi. Telefon numaranızı kontrol edip tekrar deneyin.',
         );
       }
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      CustomDialog.showError(
-        context: context,
-        title: LanguageManager.translate('Hata'),
-        message: LanguageManager.translate('Şifre değiştirme sırasında bir hata oluştu. Lütfen tekrar deneyin.'),
-        buttonText: LanguageManager.translate('Tamam'),
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _sendingCode = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _reset() async {
+    setState(() {
+      _codeError =
+          RegExp(r'^[0-9]{6}$').hasMatch(_code.text.trim())
+              ? null
+              : LanguageManager.translate('6 haneli doğrulama kodunu girin.');
+      _passwordError =
+          _password.text.length >= 8
+              ? null
+              : LanguageManager.translate('Şifre en az 8 karakter olmalıdır.');
+    });
+    if (_codeError != null || _passwordError != null) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      await ApiService.resetPassword(
+        _phone.text.trim(),
+        _code.text.trim(),
+        _password.text,
       );
+      if (!mounted) return;
+      _code.clear();
+      _password.clear();
+      CustomDialog.showSuccess(
+        context: context,
+        title: LanguageManager.translate('Başarılı!'),
+        message: LanguageManager.translate(
+          'Şifreniz değiştirildi. Yeni şifrenizle giriş yapabilirsiniz.',
+        ),
+        buttonText: LanguageManager.translate('Giriş Yap'),
+        onButtonPressed:
+            () => Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const LoginPage()),
+            ),
+      );
+    } catch (_) {
+      if (mounted) {
+        _showError(
+          'Kod geçersiz, süresi dolmuş veya deneme sınırına ulaşılmış. Yeni kod isteyin.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+        });
+      }
     }
   }
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _emailController.dispose();
-    _phoneController.dispose();
-    _newPasswordController.dispose();
-    _nameFocusNode.dispose();
-    _emailFocusNode.dispose();
-    _phoneFocusNode.dispose();
-    _passwordFocusNode.dispose();
-    _animationController.dispose();
+    _phone.dispose();
+    _code.dispose();
+    _password.dispose();
+    _phoneFocus.dispose();
+    _codeFocus.dispose();
+    _passwordFocus.dispose();
     super.dispose();
   }
 
@@ -322,301 +193,292 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> with TickerProv
     return Scaffold(
       backgroundColor: ForgotPasswordTheme.backgroundColor,
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () {
-            Navigator.pushReplacement(
-              context,
-              PageRouteBuilder(
-                pageBuilder: (context, animation, secondaryAnimation) => const LoginPage(),
-                transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                  return SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(-1, 0),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: child,
-                  );
-                },
-                transitionDuration: const Duration(milliseconds: 300),
-              ),
-            );
-          },
-        ),
         title: Text(
-          LanguageManager.translate("Şifre Sıfırlama"),
+          LanguageManager.translate('Şifre Sıfırlama'),
           style: const TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.w600,
             fontFamily: 'Poppins',
-            color: Colors.white,
           ),
         ),
         backgroundColor: ForgotPasswordTheme.primaryColor,
+        foregroundColor: Colors.white,
         elevation: 0,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(
-            bottom: Radius.circular(20),
-          ),
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
         ),
       ),
-      body: FadeTransition(
-        opacity: _fadeAnimation,
-        child: SlideTransition(
-          position: _slideAnimation,
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              children: [
-                // Header
-                const SizedBox(height: 20),
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: ForgotPasswordTheme.primaryColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(40),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 20),
+            Center(
+              child: Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: ForgotPasswordTheme.primaryColor.withValues(
+                    alpha: 0.1,
                   ),
-                  child: Icon(
-                    Icons.lock_reset,
-                    size: 40,
-                    color: ForgotPasswordTheme.primaryColor,
-                  ),
+                  borderRadius: BorderRadius.circular(40),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  LanguageManager.translate("Şifre Sıfırlama"),
-                  style: ForgotPasswordTheme.titleStyle,
+                child: const Icon(
+                  Icons.lock_reset,
+                  size: 40,
+                  color: ForgotPasswordTheme.primaryColor,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  LanguageManager.translate("Bilgilerinizi girerek şifrenizi sıfırlayın"),
-                  style: ForgotPasswordTheme.subtitleStyle,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 30),
-                
-                // Form
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: ForgotPasswordTheme.whiteColor,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
-                          blurRadius: 10,
-                          offset: const Offset(0, 5),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                                                 Column(
-                           children: [
-                                                              _buildTextField(
-                                  controller: _nameController,
-                                  hintText: LanguageManager.translate("Ad Soyad"),
-                                  icon: Icons.person_outline,
-                                  focusNode: _nameFocusNode,
-                                  isValid: _isNameValid,
-                                  errorText: LanguageManager.translate("Ad soyad en az 2 karakter olmalıdır"),
-                                ),
-                              const SizedBox(height: 12),
-                                                              _buildTextField(
-                                  controller: _emailController,
-                                  hintText: LanguageManager.translate("E-posta"),
-                                  icon: Icons.email_outlined,
-                                  keyboardType: TextInputType.emailAddress,
-                                  focusNode: _emailFocusNode,
-                                  isValid: _isEmailValid,
-                                  errorText: LanguageManager.translate("Geçerli bir e-posta adresi giriniz"),
-                                ),
-                              const SizedBox(height: 12),
-                                                              _buildTextField(
-                                  controller: _phoneController,
-                                  hintText: LanguageManager.translate("Telefon Numarası"),
-                                  icon: Icons.phone_outlined,
-                                  keyboardType: TextInputType.phone,
-                                  focusNode: _phoneFocusNode,
-                                  isValid: _isPhoneValid,
-                                  errorText: LanguageManager.translate("Telefon numarası 11 haneli olmalıdır"),
-                                  maxLength: 11,
-                                ),
-                              const SizedBox(height: 12),
-                                                              _buildTextField(
-                                  controller: _newPasswordController,
-                                  hintText: LanguageManager.translate("Yeni Şifre"),
-                                  icon: Icons.lock_outlined,
-                                  isPassword: true,
-                                  focusNode: _passwordFocusNode,
-                                  isValid: _isPasswordValid,
-                                  errorText: LanguageManager.translate("Şifre en az 8 karakter, bir büyük harf, bir küçük harf ve bir rakam içermelidir"),
-                                ),
-                              const SizedBox(height: 20),
-                              
-                              // Şifre sıfırlama butonu - yukarı taşındı
-                              SizedBox(
-                                width: double.infinity,
-                                height: 50,
-                                child: ElevatedButton(
-                                  onPressed: _isLoading || !_isFormValid() ? null : _handleResetPassword,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: ForgotPasswordTheme.primaryColor,
-                                    foregroundColor: ForgotPasswordTheme.whiteColor,
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(15),
-                                    ),
-                                  ),
-                                  child: _isLoading
-                                      ? const SizedBox(
-                                          width: 20,
-                                          height: 20,
-                                          child: CircularProgressIndicator(
-                                            color: ForgotPasswordTheme.whiteColor,
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : Text(
-                                          LanguageManager.translate("Şifreyi Sıfırla"),
-                                          style: ForgotPasswordTheme.buttonTextStyle,
-                                        ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          
-                          const Spacer(),
-                        
-                        const SizedBox(height: 16),
-                        
-                        // Giriş sayfasına dön linki
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              LanguageManager.translate("Geri dönmek istiyor musunuz? "),
-                              style: ForgotPasswordTheme.subtitleStyle,
-                            ),
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.pushReplacement(
-                                  context,
-                                  PageRouteBuilder(
-                                    pageBuilder: (context, animation, secondaryAnimation) => const LoginPage(),
-                                    transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                                      return SlideTransition(
-                                        position: Tween<Offset>(
-                                          begin: const Offset(-1, 0),
-                                          end: Offset.zero,
-                                        ).animate(animation),
-                                        child: child,
-                                      );
-                                    },
-                                    transitionDuration: const Duration(milliseconds: 300),
-                                  ),
-                                );
-                              },
-                              child: Text(
-                                LanguageManager.translate("Giriş Yap"),
-                                style: ForgotPasswordTheme.linkTextStyle.copyWith(
-                                  decoration: TextDecoration.underline,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+            const SizedBox(height: 16),
+            Text(
+              LanguageManager.translate('Şifre Sıfırlama'),
+              style: ForgotPasswordTheme.titleStyle,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              LanguageManager.translate(
+                'Telefonunuza gönderilen kodla yeni şifrenizi belirleyin.',
+              ),
+              style: ForgotPasswordTheme.subtitleStyle,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 30),
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: ForgotPasswordTheme.whiteColor,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildAuthField(
+                    fieldKey: const Key('reset-phone'),
+                    controller: _phone,
+                    focus: _phoneFocus,
+                    hint: 'Telefon Numarası',
+                    icon: Icons.phone_outlined,
+                    keyboardType: TextInputType.phone,
+                    error: _phoneError,
+                    onChanged:
+                        (_) => setState(() {
+                          _codeSent = false;
+                          _message = null;
+                          _phoneError = null;
+                          _code.clear();
+                        }),
+                  ),
+                  const SizedBox(height: 20),
+                  _buildAction(
+                    _codeSent ? 'Yeni Kod Gönder' : 'Kod Gönder',
+                    _requestCode,
+                    loading: _busy && _sendingCode,
+                  ),
+                  if (_message != null) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: ForgotPasswordTheme.primaryColor.withValues(
+                          alpha: 0.06,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.info_outline,
+                            color: ForgotPasswordTheme.primaryColor,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              LanguageManager.translate(_message!),
+                              style: ForgotPasswordTheme.subtitleStyle.copyWith(
+                                fontSize: 14,
+                                height: 1.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (_codeSent) ...[
+                    const SizedBox(height: 20),
+                    _buildAuthField(
+                      fieldKey: const Key('reset-code'),
+                      controller: _code,
+                      focus: _codeFocus,
+                      hint: 'Doğrulama Kodu',
+                      icon: Icons.pin_outlined,
+                      keyboardType: TextInputType.number,
+                      maxLength: 6,
+                      error: _codeError,
+                      onChanged:
+                          (_) => setState(() {
+                            _codeError = null;
+                          }),
+                    ),
+                    const SizedBox(height: 20),
+                    _buildAuthField(
+                      fieldKey: const Key('reset-password'),
+                      controller: _password,
+                      focus: _passwordFocus,
+                      hint: 'Yeni Şifre',
+                      icon: Icons.lock_outlined,
+                      password: true,
+                      error: _passwordError,
+                      onChanged:
+                          (_) => setState(() {
+                            _passwordError = null;
+                          }),
+                    ),
+                    const SizedBox(height: 20),
+                    _buildAction(
+                      'Şifreyi Sıfırla',
+                      _reset,
+                      loading: _busy && !_sendingCode,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            TextButton(
+              onPressed:
+                  _busy
+                      ? null
+                      : () => Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(builder: (_) => const LoginPage()),
+                      ),
+              child: Text(
+                LanguageManager.translate('Giriş Yap'),
+                style: ForgotPasswordTheme.linkTextStyle,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildTextField({
+  // Match the existing user login form: filled grey fields, blue focus, Poppins,
+  // 15px corners and 50px buttons. Account Information keeps its own card style.
+  Widget _buildAuthField({
+    required Key fieldKey,
     required TextEditingController controller,
-    required String hintText,
+    required FocusNode focus,
+    required String hint,
     required IconData icon,
-    bool isPassword = false,
     TextInputType? keyboardType,
-    FocusNode? focusNode,
-    bool isValid = true,
-    String? errorText,
+    bool password = false,
     int? maxLength,
+    String? error,
+    ValueChanged<String>? onChanged,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
           decoration: BoxDecoration(
-            color: focusNode?.hasFocus == true ? ForgotPasswordTheme.whiteColor : ForgotPasswordTheme.lightGreyColor,
+            color:
+                focus.hasFocus
+                    ? ForgotPasswordTheme.whiteColor
+                    : ForgotPasswordTheme.lightGreyColor,
             borderRadius: BorderRadius.circular(15),
-            border: Border.all(
-              color: isValid ? Colors.transparent : ForgotPasswordTheme.errorColor,
-              width: 1,
-            ),
           ),
-                     child: TextField(
-             controller: controller,
-             focusNode: focusNode,
-             obscureText: isPassword ? _obscurePassword : false,
-             keyboardType: keyboardType,
-             maxLength: maxLength,
-            style: const TextStyle(
-              fontSize: 16,
-              fontFamily: 'Poppins',
-            ),
+          child: TextField(
+            key: fieldKey,
+            controller: controller,
+            focusNode: focus,
+            enabled: !_busy,
+            obscureText: password && _obscurePassword,
+            autocorrect: !password,
+            enableSuggestions: !password,
+            keyboardType: keyboardType,
+            maxLength: maxLength,
+            onChanged: onChanged,
+            style: const TextStyle(fontSize: 16, fontFamily: 'Poppins'),
             decoration: InputDecoration(
-              hintText: hintText,
-              hintStyle: TextStyle(
+              hintText: LanguageManager.translate(hint),
+              counterText: '',
+              hintStyle: const TextStyle(
                 color: ForgotPasswordTheme.greyColor,
                 fontFamily: 'Poppins',
               ),
               filled: true,
               fillColor: Colors.transparent,
               prefixIcon: Icon(icon, color: ForgotPasswordTheme.primaryColor),
-              suffixIcon: isPassword
-                  ? IconButton(
-                      icon: Icon(
-                        _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                        color: ForgotPasswordTheme.primaryColor,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _obscurePassword = !_obscurePassword;
-                        });
-                      },
-                    )
-                  : null,
+              suffixIcon:
+                  password
+                      ? IconButton(
+                        tooltip: LanguageManager.translate(
+                          _obscurePassword ? 'Şifreyi göster' : 'Şifreyi gizle',
+                        ),
+                        onPressed:
+                            _busy
+                                ? null
+                                : () => setState(() {
+                                  _obscurePassword = !_obscurePassword;
+                                }),
+                        icon: Icon(
+                          _obscurePassword
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                          color: ForgotPasswordTheme.primaryColor,
+                        ),
+                      )
+                      : null,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(15),
                 borderSide: BorderSide.none,
               ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(15),
+                borderSide:
+                    error == null
+                        ? BorderSide.none
+                        : const BorderSide(
+                          color: ForgotPasswordTheme.errorColor,
+                        ),
+              ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(15),
                 borderSide: BorderSide(
-                  color: isValid ? ForgotPasswordTheme.primaryColor : ForgotPasswordTheme.errorColor, 
-                  width: 2
+                  color:
+                      error == null
+                          ? ForgotPasswordTheme.primaryColor
+                          : ForgotPasswordTheme.errorColor,
+                  width: 2,
                 ),
               ),
-                             contentPadding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
-               counterText: "", // Hide character counter
+              contentPadding: const EdgeInsets.symmetric(
+                vertical: 15,
+                horizontal: 20,
+              ),
             ),
           ),
         ),
-        if (!isValid && errorText != null)
+        if (error != null)
           Padding(
             padding: const EdgeInsets.only(top: 8, left: 12),
             child: Text(
-              errorText,
-              style: TextStyle(
+              error,
+              style: const TextStyle(
                 color: ForgotPasswordTheme.errorColor,
                 fontSize: 12,
                 fontFamily: 'Poppins',
@@ -624,6 +486,42 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> with TickerProv
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildAction(
+    String label,
+    VoidCallback onPressed, {
+    required bool loading,
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton(
+        onPressed: _busy ? null : onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: ForgotPasswordTheme.primaryColor,
+          foregroundColor: ForgotPasswordTheme.whiteColor,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
+        ),
+        child:
+            loading
+                ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
+                )
+                : Text(
+                  LanguageManager.translate(label),
+                  style: ForgotPasswordTheme.buttonTextStyle,
+                ),
+      ),
     );
   }
 }

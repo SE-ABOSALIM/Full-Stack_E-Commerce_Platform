@@ -1,3 +1,4 @@
+import '../../Services/auth_http.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -62,9 +63,9 @@ class _SellerProductsPageState extends State<SellerProductsPage> {
         Uri.parse(AppConfig.uploadImageUrl),
       );
       request.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
-      var response = await request.send();
+      var response = await AuthHttp.send(request);
       if (response.statusCode == 200) {
-        final respStr = await response.stream.bytesToString();
+        final respStr = response.body;
         final jsonResp = jsonDecode(respStr);
         return jsonResp['url'];
       } else {
@@ -400,9 +401,9 @@ class _ProductDialogState extends State<_ProductDialog> {
         Uri.parse(AppConfig.uploadImageUrl),
       );
       request.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
-      var response = await request.send();
+      var response = await AuthHttp.send(request);
       if (response.statusCode == 200) {
-        final respStr = await response.stream.bytesToString();
+        final respStr = response.body;
         final jsonResp = jsonDecode(respStr);
         return jsonResp['url'];
       } else {

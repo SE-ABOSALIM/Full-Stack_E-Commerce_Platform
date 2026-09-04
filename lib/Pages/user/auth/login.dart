@@ -1,17 +1,12 @@
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'sign_up.dart';
 import 'forgot_password.dart';
 import '../home.dart';
 import '../cart/my_cart.dart';
-import '../../../Models/session.dart';
 import '../../../Models/seller_session.dart';
-import '../../../Models/User.dart';
 import '../../../Services/api_service.dart';
 import '../../../Widgets/custom_dialog.dart';
 import '../../../Utils/language_manager.dart';
-import 'dart:convert'; // Added for jsonDecode
-import 'package:http/http.dart' as http; // Added for http
 
 // Tema ve stil sabitleri
 class AppTheme {
@@ -165,63 +160,35 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     final password = _passwordController.text;
 
     try {
-      // Backend API üzerinden login yap
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/users/login'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: Uri(queryParameters: {
-          'email': email,
-          'password': password,
-        }).query,
+      await ApiService.loginUser(email, password);
+      if (!mounted) return;
+      setState(() { _isLoading = false; });
+      // Guest sepetini kullanıcıya aktar
+      await CartManager.mergeGuestCartToUserCart(email);
+      // Kullanıcıya özel sepeti yükle
+      await CartManager.loadCart();
+      if (!mounted) return;
+
+      // Başarı mesajı göster
+      CustomDialog.showSuccess(
+        context: context,
+        title: LanguageManager.translate('Giriş Başarılı'),
+        message: LanguageManager.translate('Başarıyla giriş yaptınız!'),
+        buttonText: LanguageManager.translate('Tamam'),
+        onButtonPressed: () {
+          // Direkt ana sayfaya yönlendir
+          Navigator.pushReplacement(
+            context,
+            PageRouteBuilder(
+              pageBuilder: (context, animation, secondaryAnimation) => const HomePage(skipSellerCheck: true),
+              transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                return FadeTransition(opacity: animation, child: child);
+              },
+              transitionDuration: const Duration(milliseconds: 500),
+            ),
+          );
+        },
       );
-
-      setState(() {
-        _isLoading = false;
-      });
-
-      if (response.statusCode == 200) {
-        final userJson = jsonDecode(response.body);
-        final foundUser = User.fromMap(userJson);
-        
-        // Oturumu başlat
-        Session.currentUser = foundUser;
-        // Oturum bilgisini kaydet
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('user_email', email);
-        // Guest sepetini kullanıcıya aktar
-        await CartManager.mergeGuestCartToUserCart(email);
-        // Kullanıcıya özel sepeti yükle
-        await CartManager.loadCart();
-        
-        // Başarı mesajı göster
-        CustomDialog.showSuccess(
-          context: context,
-          title: LanguageManager.translate('Giriş Başarılı'),
-          message: LanguageManager.translate('Başarıyla giriş yaptınız!'),
-          buttonText: LanguageManager.translate('Tamam'),
-          onButtonPressed: () {
-            // Direkt ana sayfaya yönlendir
-            Navigator.pushReplacement(
-              context,
-              PageRouteBuilder(
-                pageBuilder: (context, animation, secondaryAnimation) => const HomePage(skipSellerCheck: true),
-                transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                  return FadeTransition(opacity: animation, child: child);
-                },
-                transitionDuration: const Duration(milliseconds: 500),
-              ),
-            );
-          },
-        );
-      } else {
-        final errorData = jsonDecode(response.body);
-        CustomDialog.showError(
-          context: context,
-          title: LanguageManager.translate('Giriş Başarısız'),
-          message: LanguageManager.translate(errorData['detail'] ?? 'E-posta veya şifre hatalı!'),
-          buttonText: LanguageManager.translate('Tamam'),
-        );
-      }
     } catch (e) {
       setState(() {
         _isLoading = false;
