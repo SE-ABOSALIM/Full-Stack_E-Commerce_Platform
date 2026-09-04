@@ -2,6 +2,7 @@ import os
 from twilio.rest import Client
 from typing import Optional
 from dotenv import load_dotenv
+from app.phone_numbers import normalize_phone_number
 from app.services.sms_language_manager import sms_language_manager
 
 # Environment variables'ları yükle
@@ -34,6 +35,8 @@ class TwilioSMS:
             dict: API yanıtı
         """
         try:
+            phone_number = normalize_phone_number(phone_number)
+
             # Dil belirtilmemişse telefon numarasından tahmin et
             if not language:
                 language = sms_language_manager.get_language_from_phone(phone_number)

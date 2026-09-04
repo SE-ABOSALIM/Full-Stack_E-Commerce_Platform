@@ -57,7 +57,7 @@ class User(Base):
     name_surname = Column(String)
     password = Column(String)
     email = Column(String)
-    phone_number = Column(String)
+    phone_number = Column(String, unique=True, index=True)
     phone_verified = Column(String, default="pending")  # pending, verified
     email_verified = Column(String, default="pending")  # pending, verified
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
@@ -88,7 +88,7 @@ class Seller(Base):
     name = Column(String)
     email = Column(String, unique=True, index=True)
     password = Column(String)
-    phone = Column(String)
+    phone = Column(String, unique=True, index=True)
     phone_verified = Column(String, default="pending")  # pending, verified
     email_verified = Column(String, default="pending")  # pending, verified
     store_name = Column(String)

@@ -15,10 +15,11 @@ ROOT = Path(__file__).resolve().parents[2]
 PASSWORD = "Private-password-789!"
 CODE = "918273"
 PHONE = "+90 532 765 43 21"
+CANONICAL_PHONE = "+905327654321"
 EMAIL = "private-buyer@example.com"
 SECRETS = [PASSWORD, CODE, PHONE, EMAIL, "private-salted:password-hash",
            "private-auth-token", "private-api-key", "private-api-secret",
-           "4111111111111111", "private-cvc", "private-identity-number"]
+           "4111111111111111", "private-cvc", "private-identity-number", CANONICAL_PHONE]
 SECRET_ERROR = " ".join(SECRETS)
 SENSITIVE_NAME = re.compile(
     r"password|verification_?code|\botp\b|\bcode\b|token|api_?key|secret|"
@@ -121,7 +122,7 @@ def test_phone_verification_logs_and_requests(client, backend, db, monkeypatch, 
     response = client.post(send_path, json={"phone_number": PHONE, "language": "tr"})
     assert response.status_code == 200, response.text
     assert response.json()["success"] is True
-    backend.twilio_sms_service.send_verification_sms.assert_called_with(PHONE, CODE, "tr")
+    backend.twilio_sms_service.send_verification_sms.assert_called_with(CANONICAL_PHONE, CODE, "tr")
     response = client.post(verify_path, json={"phone_number": PHONE, "verification_code": CODE})
     assert response.status_code == 200
     assert response.json()["success"] is True
@@ -171,7 +172,9 @@ def test_twilio_receives_sms_body_but_logs_do_not(backend, monkeypatch, capsys, 
     body = f"Your verification code is {CODE}. {PASSWORD}"
     result = service.send_sms(PHONE, body, "tr")
     factory.assert_called_once_with("test-account", SECRETS[5])
-    sdk.messages.create.assert_called_once_with(body=body, from_="+90 532 111 22 33", to=PHONE)
+    sdk.messages.create.assert_called_once_with(
+        body=body, from_="+90 532 111 22 33", to=CANONICAL_PHONE
+    )
     assert result["success"] is not failure
     output = assert_safe_output(capsys, body, "+90 532 111 22 33")
     assert "SMS" in output

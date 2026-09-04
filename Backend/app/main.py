@@ -20,6 +20,7 @@ import hmac
 import secrets
 import re
 from app.auth import issue_access_token, read_access_token, password_stamp, signing_key
+from app.phone_numbers import normalize_phone_number
 from app.services.twilio_sms_service import twilio_sms_service
 from app.services.sms_language_manager import sms_language_manager
 from app.services.email_service import email_service
@@ -124,23 +125,12 @@ def owned_resource(db, model, resource_id, actor, owner_field="user_id"):
     return resource
 
 
-def normalize_phone(phone):
-    phone = re.sub(r"[\s()-]", "", phone)
-    if phone.startswith("0"):
-        phone = "+90" + phone[1:]
-    elif not phone.startswith("+"):
-        phone = "+" + phone
-    if not re.fullmatch(r"\+[1-9][0-9]{7,14}", phone):
-        raise HTTPException(422, "Invalid phone number")
-    return phone
-
-
 def account_for_reset(db, phone):
     # Legacy profiles used several phone formats; never pick arbitrarily if duplicated.
     matches = []
     for user in db.query(models.User).all():
         try:
-            if normalize_phone(user.phone_number or "") == phone:
+            if normalize_phone_number(user.phone_number or "") == phone:
                 matches.append(user)
         except HTTPException:
             continue
@@ -148,31 +138,67 @@ def account_for_reset(db, phone):
 
 
 def ensure_user_contacts_available(db, phone, email, except_id=None):
-    normalized = normalize_phone(phone)
+    normalized = normalize_phone_number(phone)
     for user in db.query(models.User).filter(models.User.id != except_id).all():
         if user.email == email:
             raise HTTPException(400, "Email is already registered")
         try:
-            other_phone = normalize_phone(user.phone_number or "")
+            other_phone = normalize_phone_number(user.phone_number or "")
         except HTTPException:
             continue
         if other_phone == normalized:
             raise HTTPException(400, "Phone number is already registered")
 
 
+def phone_records(db, model, field, phone):
+    """Find canonical matches while old development data is being migrated."""
+    normalized = normalize_phone_number(phone)
+    matches = []
+    for record in db.query(model).all():
+        try:
+            if normalize_phone_number(getattr(record, field) or "") == normalized:
+                matches.append(record)
+        except HTTPException:
+            continue
+    return normalized, matches
+
+
+def one_phone_record(db, model, field, phone):
+    normalized, matches = phone_records(db, model, field, phone)
+    if len(matches) > 1:
+        raise HTTPException(409, "Phone identity has conflicting records")
+    return normalized, matches[0] if matches else None
+
+
+def delete_phone_records(db, model, field, phone):
+    normalized, matches = phone_records(db, model, field, phone)
+    for record in matches:
+        db.delete(record)
+    return normalized
+
+
+def ensure_seller_phone_available(db, phone, except_id=None):
+    normalized, matches = phone_records(db, models.Seller, "phone", phone)
+    if any(record.id != except_id for record in matches):
+        raise HTTPException(400, "Phone number is already registered")
+    return normalized
+
+
 def phone_verification_owner(db, phone, role, actor):
     model = models.User if role == "user" else models.Seller
     field = "phone_number" if role == "user" else "phone"
-    matches = db.query(model).filter(getattr(model, field) == phone).all()
+    normalized, matches = phone_records(db, model, field, phone)
     if not matches:
-        return None  # Public registration challenge, not an existing account mutation.
+        return normalized, None  # Public registration challenge, not an existing account mutation.
+    if len(matches) > 1:
+        raise HTTPException(409, "Phone identity has conflicting records")
     if actor is None:
         raise HTTPException(401, "Authentication required")
     if not isinstance(actor, model):
         raise HTTPException(403, "Wrong account type")
     for account in matches:
         require_owner(account.id, actor)
-    return matches[0]
+    return normalized, matches[0]
 
 
 def reset_code_hash(phone, code):
@@ -213,7 +239,7 @@ def change_password(payload: schemas.PasswordChange, actor=Depends(current_user)
 
 @app.post("/auth/forgot-password/request")
 def request_password_reset(payload: schemas.PasswordResetRequest, db: Session = Depends(get_db)):
-    phone = normalize_phone(payload.phone_number)
+    phone = normalize_phone_number(payload.phone_number)
     user = account_for_reset(db, phone)
     result = {"message": "If an account matches, a verification code has been sent", "success": True}
     if user is None:
@@ -244,7 +270,7 @@ def request_password_reset(payload: schemas.PasswordResetRequest, db: Session = 
 
 @app.post("/auth/forgot-password/reset")
 def reset_password(payload: schemas.PasswordReset, db: Session = Depends(get_db)):
-    phone = normalize_phone(payload.phone_number)
+    phone = normalize_phone_number(payload.phone_number)
     user = account_for_reset(db, phone)
     challenge = (db.query(models.PasswordResetVerification).filter_by(user_id=user.id).first()
                  if user else None)
@@ -597,12 +623,7 @@ def generate_verification_code():
 def send_sms_verification(phone_number: str, code: str, language: str = None):
     """Global SMS doğrulama kodu gönder (çok dilli)"""
     try:
-        # Telefon numarasını formatla (0532XXXXXXXX -> +905321234567)
-        formatted_phone = phone_number
-        if phone_number.startswith('0'):
-            formatted_phone = '+90' + phone_number[1:]
-        elif not phone_number.startswith('+'):
-            formatted_phone = '+' + phone_number
+        formatted_phone = normalize_phone_number(phone_number)
 
         # Dil belirtilmemişse telefon numarasından tahmin et
         if not language:
@@ -619,36 +640,6 @@ def send_sms_verification(phone_number: str, code: str, language: str = None):
 
     except Exception as e:
         return False
-
-def validate_phone_number(phone_number: str):
-    """Global telefon numarası formatını doğrula"""
-    import re
-
-    # Global telefon numarası formatları
-    patterns = [
-        # Türkiye
-        r'^\+90\s5[0-9]{2}\s[0-9]{3}\s[0-9]{2}\s[0-9]{2}$',  # +90 5XX XXX XX XX
-        r'^\+905[0-9]{2}[0-9]{3}[0-9]{2}[0-9]{2}$',  # +905XXXXXXXXX
-        r'^05[0-9]{2}[0-9]{3}[0-9]{2}[0-9]{2}$',  # 05XXXXXXXXX
-
-        # ABD
-        r'^\+1[0-9]{10}$',  # +15551234567
-
-        # Almanya
-        r'^\+49[0-9]{10,11}$',  # +4915123456789
-
-        # İngiltere
-        r'^\+44[0-9]{10}$',  # +44123456789
-
-        # Genel uluslararası format
-        r'^\+[1-9][0-9]{7,14}$',  # +[ülke kodu][numara]
-    ]
-
-    for pattern in patterns:
-        if re.match(pattern, phone_number):
-            return True
-
-    return False
 
 # --- PRODUCT CRUD ---
 @app.post("/products", response_model=schemas.ProductBase)
@@ -741,24 +732,8 @@ def send_verification_code(verification: schemas.PhoneVerificationCreate, db: Se
     """Telefon numarasına doğrulama kodu gönder"""
 
 
-    # Telefon numarası formatını doğrula
-    if not validate_phone_number(verification.phone_number):
-        raise HTTPException(
-            status_code=400,
-            detail="Geçersiz telefon numarası formatı. Format: +90 5XX XXX XX XX"
-        )
-
-
-    # Telefon numarasını backend formatına çevir
-    formatted_phone = verification.phone_number
-    if verification.phone_number.startswith('0'):
-        formatted_phone = '+90 ' + verification.phone_number[1:4] + ' ' + verification.phone_number[4:7] + ' ' + verification.phone_number[7:9] + ' ' + verification.phone_number[9:11]
-
-    # Bu telefon numarasına kayıtlı kullanıcı var mı kontrol et (hem formatlanmış hem formatlanmamış)
-    existing_user = db.query(models.User).filter(
-        (models.User.phone_number == verification.phone_number) |
-        (models.User.phone_number == formatted_phone)
-    ).first()
+    formatted_phone = normalize_phone_number(verification.phone_number)
+    _, existing_user = one_phone_record(db, models.User, "phone_number", formatted_phone)
 
     if existing_user:
         raise HTTPException(
@@ -766,24 +741,11 @@ def send_verification_code(verification: schemas.PhoneVerificationCreate, db: Se
             detail="Bu telefon numarasına kayıtlı başka bir hesap vardır"
         )
 
-    # Satıcı tablosunda da kontrol et
-    existing_seller = db.query(models.Seller).filter(
-        models.Seller.phone == verification.phone_number
-    ).first()
+    _, existing_verification = one_phone_record(
+        db, models.PhoneVerification, "phone_number", formatted_phone
+    )
 
-    if existing_seller:
-        raise HTTPException(
-            status_code=400,
-            detail="Bu telefon numarasına kayıtlı başka bir hesap vardır"
-        )
-
-    # Daha önce doğrulanmış mı kontrol et
-    existing_verification = db.query(models.PhoneVerification).filter(
-        models.PhoneVerification.phone_number == verification.phone_number,
-        models.PhoneVerification.is_verified == "verified"
-    ).first()
-
-    if existing_verification:
+    if existing_verification and existing_verification.is_verified == "verified":
         raise HTTPException(
             status_code=400,
             detail="Bu telefon numarası zaten doğrulanmış"
@@ -791,9 +753,7 @@ def send_verification_code(verification: schemas.PhoneVerificationCreate, db: Se
 
 
     # Eski doğrulama kodlarını temizle
-    db.query(models.PhoneVerification).filter(
-        models.PhoneVerification.phone_number == verification.phone_number
-    ).delete()
+    delete_phone_records(db, models.PhoneVerification, "phone_number", formatted_phone)
 
     # Yeni doğrulama kodu oluştur
     verification_code = generate_verification_code()
@@ -803,7 +763,7 @@ def send_verification_code(verification: schemas.PhoneVerificationCreate, db: Se
     try:
         # Veritabanına kaydet
         db_verification = models.PhoneVerification(
-            phone_number=verification.phone_number,
+            phone_number=formatted_phone,
             verification_code=verification_code,
             is_verified="pending",
             attempts=0,
@@ -818,7 +778,7 @@ def send_verification_code(verification: schemas.PhoneVerificationCreate, db: Se
         raise HTTPException(status_code=500, detail=f"Veritabanı hatası: {str(e)}")
 
     # SMS gönder (Twilio ile çok dilli)
-    send_sms_verification(verification.phone_number, verification_code, verification.language)
+    send_sms_verification(formatted_phone, verification_code, verification.language)
 
     try:
         response = schemas.PhoneVerificationResponse(
@@ -835,12 +795,14 @@ def send_verification_code(verification: schemas.PhoneVerificationCreate, db: Se
 @app.post("/verify-phone", response_model=schemas.PhoneVerificationResponse)
 def verify_phone(verification: schemas.PhoneVerificationVerify, db: Session = Depends(get_db), actor=Depends(optional_actor)):
     """Telefon numarası doğrulama kodunu doğrula"""
-    account = phone_verification_owner(db, verification.phone_number, "user", actor)
+    phone_number, account = phone_verification_owner(
+        db, verification.phone_number, "user", actor
+    )
 
     # Doğrulama kaydını bul
-    db_verification = db.query(models.PhoneVerification).filter(
-        models.PhoneVerification.phone_number == verification.phone_number
-    ).first()
+    _, db_verification = one_phone_record(
+        db, models.PhoneVerification, "phone_number", phone_number
+    )
 
     if not db_verification:
         raise HTTPException(
@@ -896,21 +858,11 @@ def send_user_phone_verification(user_id: int, db: Session = Depends(get_db), ac
     if not user.phone_number:
         raise HTTPException(status_code=400, detail="Kullanıcının telefon numarası bulunamadı")
 
-    phone_number = user.phone_number
-
-    # Telefon numarası formatını doğrula
-    if not validate_phone_number(phone_number):
-
-        raise HTTPException(
-            status_code=400,
-            detail="Geçersiz telefon numarası formatı. Format: +90 5XX XXX XX XX"
-        )
+    phone_number = normalize_phone_number(user.phone_number)
 
 
     # Eski doğrulama kodlarını temizle
-    db.query(models.PhoneVerification).filter(
-        models.PhoneVerification.phone_number == phone_number
-    ).delete()
+    delete_phone_records(db, models.PhoneVerification, "phone_number", phone_number)
 
     # Yeni doğrulama kodu oluştur
     verification_code = generate_verification_code()
@@ -990,22 +942,16 @@ def check_sender_id_support():
 # --- USER CRUD ---
 @app.post("/users", response_model=schemas.UserBase)
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    ensure_user_contacts_available(db, user.phone_number, user.email)
-
-    # Telefon numarasını backend formatına çevir
-    formatted_phone = user.phone_number
-    if user.phone_number.startswith('0'):
-        formatted_phone = '+90 ' + user.phone_number[1:4] + ' ' + user.phone_number[4:7] + ' ' + user.phone_number[7:9] + ' ' + user.phone_number[9:11]
+    formatted_phone = normalize_phone_number(user.phone_number)
+    ensure_user_contacts_available(db, formatted_phone, user.email)
 
     # Telefon numarası doğrulanmış mı kontrol et (hem formatlanmış hem formatlanmamış)
-    phone_verification = db.query(models.PhoneVerification).filter(
-        (models.PhoneVerification.phone_number == formatted_phone) |
-        (models.PhoneVerification.phone_number == user.phone_number),
-        models.PhoneVerification.is_verified == "verified"
-    ).first()
+    _, phone_verification = one_phone_record(
+        db, models.PhoneVerification, "phone_number", formatted_phone
+    )
 
     # Telefon doğrulanmamışsa hata ver
-    if not phone_verification:
+    if not phone_verification or phone_verification.is_verified != "verified":
         raise HTTPException(
             status_code=400,
             detail="Telefon numarası doğrulanmamış. Lütfen önce telefon numaranızı doğrulayın."
@@ -1097,8 +1043,11 @@ def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(ge
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    ensure_user_contacts_available(db, user.phone_number, user.email, actor.id)
-    if user.phone_number != actor.phone_number:
+    normalized_phone = normalize_phone_number(user.phone_number)
+    current_phone = normalize_phone_number(actor.phone_number)
+    ensure_user_contacts_available(db, normalized_phone, user.email, actor.id)
+    phone_changed = normalized_phone != current_phone
+    if phone_changed:
         db.query(models.PasswordResetVerification).filter_by(user_id=actor.id).delete()
 
     # Email değişikliği kontrolü
@@ -1115,16 +1064,12 @@ def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(ge
 
 
     # Telefon numarası değişikliği kontrolü
-    if user.phone_number and user.phone_number != db_user.phone_number:
+    if phone_changed:
         old_phone = db_user.phone_number
-        new_phone = user.phone_number
+        new_phone = normalized_phone
 
         # Eski telefon doğrulama kayıtlarını temizle
-        old_phone_verifications = db.query(models.PhoneVerification).filter(
-            models.PhoneVerification.phone_number == old_phone
-        ).all()
-        for verification in old_phone_verifications:
-            db.delete(verification)
+        delete_phone_records(db, models.PhoneVerification, "phone_number", old_phone)
 
         # Telefon doğrulama durumunu sıfırla
         db_user.phone_verified = "pending"
@@ -1132,15 +1077,6 @@ def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(ge
 
         # Yeni telefon numarasına otomatik kod gönder
         try:
-            # Doğrulama ve loglar
-
-            if not validate_phone_number(new_phone):
-
-                raise HTTPException(
-                    status_code=400,
-                    detail="Geçersiz telefon numarası formatı. Format: +90 5XX XXX XX XX"
-                )
-
             # Önce telefon numarasını güncelle
             db_user.phone_number = new_phone
             db.commit()
@@ -1153,11 +1089,7 @@ def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(ge
 
 
             # Eski doğrulama kayıtlarını temizle (yeni numara için)
-            existing_verifications = db.query(models.PhoneVerification).filter(
-                models.PhoneVerification.phone_number == new_phone
-            ).all()
-            for verification in existing_verifications:
-                db.delete(verification)
+            delete_phone_records(db, models.PhoneVerification, "phone_number", new_phone)
 
             # Yeni doğrulama kaydı oluştur
             phone_verification = models.PhoneVerification(
@@ -1190,7 +1122,9 @@ def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(ge
             )
 
     # Diğer alanları güncelle
-    for key, value in user.dict().items():
+    updates = user.dict()
+    updates["phone_number"] = normalized_phone
+    for key, value in updates.items():
         if value is not None:
             setattr(db_user, key, value)
 
@@ -1683,13 +1617,14 @@ async def create_seller(
     db: Session = Depends(get_db)
 ):
     try:
-        # Telefon numarası doğrulanmış mı kontrol et (seller tablosunda)
-        phone_verification = db.query(models.PhoneVerificationSeller).filter(
-            models.PhoneVerificationSeller.phone_number == phone,
-            models.PhoneVerificationSeller.is_verified == "verified"
-        ).first()
+        formatted_phone = ensure_seller_phone_available(db, phone)
 
-        if not phone_verification:
+        # Telefon numarası doğrulanmış mı kontrol et (seller tablosunda)
+        _, phone_verification = one_phone_record(
+            db, models.PhoneVerificationSeller, "phone_number", formatted_phone
+        )
+
+        if not phone_verification or phone_verification.is_verified != "verified":
             raise HTTPException(
                 status_code=400,
                 detail="Telefon numarası doğrulanmamış. Lütfen önce telefon numaranızı doğrulayın"
@@ -1723,7 +1658,7 @@ async def create_seller(
             name=name,
             email=email,
             password=hashed_password,
-            phone=phone,
+            phone=formatted_phone,
             phone_verified="verified",
             email_verified="pending",
             store_name=store_name,
@@ -1885,6 +1820,14 @@ async def update_seller_profile(
     if not seller:
         raise HTTPException(status_code=404, detail="Seller not found")
 
+    normalized_phone = (
+        ensure_seller_phone_available(db, phone, actor.id)
+        if phone is not None
+        else normalize_phone_number(seller.phone)
+    )
+    current_phone = normalize_phone_number(seller.phone)
+    phone_changed = normalized_phone != current_phone
+
     # Eski logo URL'ini sakla
     old_logo_url = seller.store_logo_url
 
@@ -1923,16 +1866,12 @@ async def update_seller_profile(
 
 
     # Telefon numarası değişikliği kontrolü
-    if phone is not None and phone != seller.phone:
+    if phone_changed:
         old_phone = seller.phone
-        new_phone = phone
+        new_phone = normalized_phone
 
         # Eski telefon doğrulama kayıtlarını temizle
-        old_phone_verifications = db.query(models.PhoneVerificationSeller).filter(
-            models.PhoneVerificationSeller.phone_number == old_phone
-        ).all()
-        for verification in old_phone_verifications:
-            db.delete(verification)
+        delete_phone_records(db, models.PhoneVerificationSeller, "phone_number", old_phone)
 
         # Telefon doğrulama durumunu sıfırla
         seller.phone_verified = "pending"
@@ -1950,11 +1889,7 @@ async def update_seller_profile(
 
 
             # Eski doğrulama kayıtlarını temizle (yeni numara için)
-            existing_verifications = db.query(models.PhoneVerificationSeller).filter(
-                models.PhoneVerificationSeller.phone_number == new_phone
-            ).all()
-            for verification in existing_verifications:
-                db.delete(verification)
+            delete_phone_records(db, models.PhoneVerificationSeller, "phone_number", new_phone)
 
             # Yeni doğrulama kaydı oluştur
             phone_verification = models.PhoneVerificationSeller(
@@ -1987,7 +1922,7 @@ async def update_seller_profile(
     if email is not None:
         seller.email = email
     if phone is not None:
-        seller.phone = phone
+        seller.phone = normalized_phone
     if store_name is not None:
         seller.store_name = store_name
     if store_description is not None:
@@ -2466,23 +2401,10 @@ def delete_seller_review(review_id: int, db: Session = Depends(get_db), actor=De
 def send_seller_verification_code(verification: schemas.PhoneVerificationSellerCreate, db: Session = Depends(get_db)):
     """Satıcılar için telefon numarasına doğrulama kodu gönder"""
 
-    # Telefon numarası formatını doğrula
-    if not validate_phone_number(verification.phone_number):
-
-        raise HTTPException(
-            status_code=400,
-            detail="Geçersiz telefon numarası formatı. Format: +90 5XX XXX XX XX"
-        )
-
-    # Telefon numarasını backend formatına çevir
-    formatted_phone = verification.phone_number
-    if verification.phone_number.startswith('0'):
-        formatted_phone = '+90 ' + verification.phone_number[1:4] + ' ' + verification.phone_number[4:7] + ' ' + verification.phone_number[7:9] + ' ' + verification.phone_number[9:11]
+    formatted_phone = normalize_phone_number(verification.phone_number)
 
     # Bu telefon numarasına kayıtlı satıcı var mı kontrol et
-    existing_seller = db.query(models.Seller).filter(
-        models.Seller.phone == verification.phone_number
-    ).first()
+    _, existing_seller = one_phone_record(db, models.Seller, "phone", formatted_phone)
 
     if existing_seller:
 
@@ -2492,12 +2414,11 @@ def send_seller_verification_code(verification: schemas.PhoneVerificationSellerC
         )
 
     # Daha önce doğrulanmış mı kontrol et (seller tablosunda)
-    existing_verification = db.query(models.PhoneVerificationSeller).filter(
-        models.PhoneVerificationSeller.phone_number == verification.phone_number,
-        models.PhoneVerificationSeller.is_verified == "verified"
-    ).first()
+    _, existing_verification = one_phone_record(
+        db, models.PhoneVerificationSeller, "phone_number", formatted_phone
+    )
 
-    if existing_verification:
+    if existing_verification and existing_verification.is_verified == "verified":
 
         raise HTTPException(
             status_code=400,
@@ -2505,9 +2426,7 @@ def send_seller_verification_code(verification: schemas.PhoneVerificationSellerC
         )
 
     # Eski doğrulama kodlarını temizle
-    db.query(models.PhoneVerificationSeller).filter(
-        models.PhoneVerificationSeller.phone_number == verification.phone_number
-    ).delete()
+    delete_phone_records(db, models.PhoneVerificationSeller, "phone_number", formatted_phone)
 
     # Yeni doğrulama kodu oluştur
     verification_code = generate_verification_code()
@@ -2517,7 +2436,7 @@ def send_seller_verification_code(verification: schemas.PhoneVerificationSellerC
     try:
         # Veritabanına kaydet
         db_verification = models.PhoneVerificationSeller(
-            phone_number=verification.phone_number,
+            phone_number=formatted_phone,
             verification_code=verification_code,
             is_verified="pending",
             attempts=0,
@@ -2534,7 +2453,7 @@ def send_seller_verification_code(verification: schemas.PhoneVerificationSellerC
         raise HTTPException(status_code=500, detail=f"Veritabanı hatası: {str(e)}")
 
     # SMS gönder (Twilio ile çok dilli)
-    send_sms_verification(verification.phone_number, verification_code, verification.language)
+    send_sms_verification(formatted_phone, verification_code, verification.language)
 
     try:
         response = schemas.PhoneVerificationResponse(
@@ -2551,12 +2470,14 @@ def send_seller_verification_code(verification: schemas.PhoneVerificationSellerC
 @app.post("/verify-seller-phone", response_model=schemas.PhoneVerificationResponse)
 def verify_seller_phone(verification: schemas.PhoneVerificationSellerVerify, db: Session = Depends(get_db), actor=Depends(optional_actor)):
     """Satıcılar için telefon numarası doğrulama kodunu doğrula"""
-    account = phone_verification_owner(db, verification.phone_number, "seller", actor)
+    phone_number, account = phone_verification_owner(
+        db, verification.phone_number, "seller", actor
+    )
 
     # Doğrulama kaydını bul
-    db_verification = db.query(models.PhoneVerificationSeller).filter(
-        models.PhoneVerificationSeller.phone_number == verification.phone_number
-    ).first()
+    _, db_verification = one_phone_record(
+        db, models.PhoneVerificationSeller, "phone_number", phone_number
+    )
 
     if not db_verification:
         raise HTTPException(
@@ -3060,15 +2981,14 @@ def check_if_following(user_id: int, seller_id: int, db: Session = Depends(get_d
 @app.post("/sellers/{seller_id}/send-phone-verification", response_model=schemas.PhoneVerificationResponse)
 def send_seller_phone_verification(seller_id: int, db: Session = Depends(get_db), actor=Depends(current_seller)):
     owned_resource(db, models.Seller, seller_id, actor, "id")
-    if not validate_phone_number(actor.phone):
-        raise HTTPException(422, "Invalid phone number")
+    phone_number = normalize_phone_number(actor.phone)
     code = generate_verification_code()
-    db.query(models.PhoneVerificationSeller).filter_by(phone_number=actor.phone).delete()
+    delete_phone_records(db, models.PhoneVerificationSeller, "phone_number", phone_number)
     db.add(models.PhoneVerificationSeller(
-        phone_number=actor.phone, verification_code=code, is_verified="pending", attempts=0,
+        phone_number=phone_number, verification_code=code, is_verified="pending", attempts=0,
         created_at=datetime.now(), expires_at=datetime.now() + timedelta(minutes=5),
     ))
-    if not send_sms_verification(actor.phone, code, "tr"):
+    if not send_sms_verification(phone_number, code, "tr"):
         db.rollback()
         raise HTTPException(503, "Verification message could not be sent")
     db.commit()

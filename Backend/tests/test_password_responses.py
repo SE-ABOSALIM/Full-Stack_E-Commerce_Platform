@@ -37,7 +37,7 @@ def assert_public_user(response, stored_password):
     assert set(body) == expected
     assert_no_password(body, PASSWORD, NEW_PASSWORD, stored_password)
     assert body["email"] == USER_INPUT["email"]
-    assert body["phone_number"] == USER_INPUT["phone_number"]
+    assert body["phone_number"].replace(" ", "") == USER_INPUT["phone_number"].replace(" ", "")
     assert body["phone_verified"] == "verified"
     assert body["email_verified"] == "pending"
     datetime.fromisoformat(body["created_at"])
