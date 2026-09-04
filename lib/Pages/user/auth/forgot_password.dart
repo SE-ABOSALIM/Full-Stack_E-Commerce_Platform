@@ -3,6 +3,7 @@ import 'login.dart';
 import '../../../Services/api_service.dart';
 import '../../../Widgets/custom_dialog.dart';
 import '../../../Utils/language_manager.dart';
+import '../../../Utils/phone_number.dart';
 
 // Tema ve stil sabitleri
 class ForgotPasswordTheme {
@@ -86,9 +87,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   }
 
   Future<void> _requestCode() async {
-    if (_phone.text.trim().isEmpty) {
+    if (!isValidPhoneNumber(_phone.text)) {
       setState(() {
-        _phoneError = LanguageManager.translate('Telefon numaranızı girin.');
+        _phoneError = LanguageManager.translate('Geçerli bir telefon numarası giriniz');
       });
       return;
     }

@@ -4,6 +4,7 @@ import '../../../Models/session.dart';
 import '../../../Services/api_service.dart';
 import '../../../Widgets/custom_dialog.dart';
 import '../../../Utils/language_manager.dart';
+import '../../../Utils/phone_number.dart';
 import '../verification/phone_verification_page.dart';
 import '../auth/login.dart';
 
@@ -182,7 +183,10 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
 
     // Email veya telefon değişikliği kontrolü
     bool emailChanged = _emailController.text != Session.currentUser!.email;
-    bool phoneChanged = _phoneController.text != Session.currentUser!.phoneNumber;
+    bool phoneChanged = !samePhoneIdentity(
+      _phoneController.text,
+      Session.currentUser!.phoneNumber,
+    );
     
     if (emailChanged || phoneChanged) {
       // Modern uyarı dialog'u göster
@@ -374,7 +378,9 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
         nameSurname: _nameController.text,
         password: '',
         email: _emailController.text,
-        phoneNumber: _phoneController.text,
+        phoneNumber: normalizePhoneNumber(_phoneController.text) ?? _phoneController.text,
+        phoneVerified: phoneChanged ? 'pending' : Session.currentUser!.phoneVerified,
+        emailVerified: emailChanged ? 'pending' : Session.currentUser!.emailVerified,
       );
       
       await ApiService.updateUser(updatedUser.id!, {

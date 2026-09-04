@@ -4,6 +4,17 @@ import 'auth_session.dart';
 import 'dart:convert';
 import '../Models/session.dart';
 import '../Utils/app_config.dart';
+import '../Utils/phone_number.dart';
+
+String _phoneForRequest(String phoneNumber) =>
+    normalizePhoneNumber(phoneNumber) ?? phoneNumber.trim();
+
+Map<String, dynamic> _withNormalizedPhone(Map<String, dynamic> data, String field) {
+  final normalized = Map<String, dynamic>.from(data);
+  final phone = normalized[field];
+  if (phone is String) normalized[field] = _phoneForRequest(phone);
+  return normalized;
+}
 
 class ApiService {
   static Future<User> loginUser(String email, String password) async {
@@ -40,7 +51,7 @@ class ApiService {
     final response = await AuthHttp.post(
       Uri.parse('$baseUrl/auth/forgot-password/request'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'phone_number': phoneNumber}),
+      body: jsonEncode({'phone_number': _phoneForRequest(phoneNumber)}),
     );
     if (response.statusCode != 200) throw Exception('Doğrulama kodu gönderilemedi');
   }
@@ -49,7 +60,7 @@ class ApiService {
     final response = await AuthHttp.post(
       Uri.parse('$baseUrl/auth/forgot-password/reset'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'phone_number': phoneNumber, 'verification_code': code, 'new_password': newPassword}),
+      body: jsonEncode({'phone_number': _phoneForRequest(phoneNumber), 'verification_code': code, 'new_password': newPassword}),
     );
     if (response.statusCode != 200) throw Exception('Kod geçersiz veya süresi dolmuş. Yeni kod isteyin.');
     await AuthSession.clear('user');
@@ -109,19 +120,10 @@ class ApiService {
 
   // --- PHONE VERIFICATION ---
   static Future<Map<String, dynamic>> sendVerificationCode(String phoneNumber) async {
-    // Telefon numarasını backend formatına çevir
-    String formattedPhone = phoneNumber;
-    if (phoneNumber.startsWith('0')) {
-      formattedPhone = '+90 ' + phoneNumber.substring(1, 4) + ' ' + 
-                      phoneNumber.substring(4, 7) + ' ' + 
-                      phoneNumber.substring(7, 9) + ' ' + 
-                      phoneNumber.substring(9, 11);
-    }
-    
     final response = await AuthHttp.post(
       Uri.parse('$baseUrl/send-verification-code'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'phone_number': formattedPhone}),
+      body: jsonEncode({'phone_number': _phoneForRequest(phoneNumber)}),
     );
     
     if (response.statusCode == 200) {
@@ -133,20 +135,11 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> verifyPhone(String phoneNumber, String verificationCode) async {
-    // Telefon numarasını backend formatına çevir
-    String formattedPhone = phoneNumber;
-    if (phoneNumber.startsWith('0')) {
-      formattedPhone = '+90 ' + phoneNumber.substring(1, 4) + ' ' + 
-                      phoneNumber.substring(4, 7) + ' ' + 
-                      phoneNumber.substring(7, 9) + ' ' + 
-                      phoneNumber.substring(9, 11);
-    }
-    
     final response = await AuthHttp.post(
       Uri.parse('$baseUrl/verify-phone'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
-        'phone_number': formattedPhone,
+        'phone_number': _phoneForRequest(phoneNumber),
         'verification_code': verificationCode,
       }),
     );
@@ -275,7 +268,7 @@ class ApiService {
     final response = await AuthHttp.post(
       Uri.parse('$baseUrl/users'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
+      body: jsonEncode(_withNormalizedPhone(data, 'phone_number')),
     );
     
     if (response.statusCode == 200 || response.statusCode == 201) {
@@ -290,7 +283,7 @@ class ApiService {
     final response = await AuthHttp.post(
       Uri.parse('$baseUrl/sellers/signup'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
+      body: jsonEncode(_withNormalizedPhone(data, 'phone')),
     );
     if (response.statusCode == 200 || response.statusCode == 201) {
       return jsonDecode(response.body);
@@ -304,7 +297,7 @@ class ApiService {
     final response = await AuthHttp.post(
       Uri.parse('$baseUrl/users'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
+      body: jsonEncode(_withNormalizedPhone(data, 'phone_number')),
     );
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception('Kullanıcı eklenemedi');
@@ -315,7 +308,7 @@ class ApiService {
     final response = await AuthHttp.put(
       Uri.parse('$baseUrl/users/me'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
+      body: jsonEncode(_withNormalizedPhone(data, 'phone_number')),
     );
     if (response.statusCode != 200) {
       throw Exception('Kullanıcı güncellenemedi');

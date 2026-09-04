@@ -5,6 +5,7 @@ import '../../../Models/User.dart';
 import '../../../Services/api_service.dart';
 import '../../../Widgets/custom_dialog.dart';
 import '../../../Utils/language_manager.dart';
+import '../../../Utils/phone_number.dart';
 
 // Tema ve stil sabitleri
 class SignUpTheme {
@@ -127,8 +128,7 @@ class _SignUpPageState extends State<SignUpPage> with TickerProviderStateMixin {
   }
 
   bool _isValidPhone(String phone) {
-    final digitsOnly = phone.replaceAll(RegExp(r'\D'), '');
-    return digitsOnly.length == 11;
+    return isValidPhoneNumber(phone);
   }
 
   void _onNameFocusChange() {
@@ -282,7 +282,7 @@ class _SignUpPageState extends State<SignUpPage> with TickerProviderStateMixin {
       CustomDialog.showError(
         context: context,
         title: LanguageManager.translate('Hata'),
-        message: LanguageManager.translate('Telefon numarası 11 haneli olmalıdır!'),
+        message: LanguageManager.translate('Geçerli bir telefon numarası giriniz'),
         buttonText: LanguageManager.translate('Tamam'),
       );
       return;
@@ -481,8 +481,7 @@ class _SignUpPageState extends State<SignUpPage> with TickerProviderStateMixin {
                                 keyboardType: TextInputType.phone,
                                 focusNode: _phoneFocusNode,
                                 isValid: _isPhoneValid,
-                                errorText: LanguageManager.translate("Telefon numarası 11 haneli olmalıdır"),
-                                maxLength: 11,
+                                errorText: LanguageManager.translate("Geçerli bir telefon numarası giriniz"),
                                 onChanged: (_) {
                                   _validatePhone();
                                   setState(() {});

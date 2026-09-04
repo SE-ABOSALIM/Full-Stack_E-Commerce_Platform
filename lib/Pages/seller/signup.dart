@@ -4,6 +4,7 @@ import '../../Services/seller_api_service.dart';
 import '../user/verification/phone_verification_page.dart';
 import '../../Widgets/custom_dialog.dart';
 import '../../Utils/language_manager.dart';
+import '../../Utils/phone_number.dart';
 
 // Tema ve stil sabitleri
 class SellerSignupTheme {
@@ -129,8 +130,7 @@ class _SellerSignupPageState extends State<SellerSignupPage> with TickerProvider
   }
 
   bool _isValidPhone(String phone) {
-    final digitsOnly = phone.replaceAll(RegExp(r'\D'), '');
-    return digitsOnly.length == 11;
+    return isValidPhoneNumber(phone);
   }
 
   void _onNameFocusChange() {
@@ -300,7 +300,7 @@ class _SellerSignupPageState extends State<SellerSignupPage> with TickerProvider
       CustomDialog.showError(
         context: context,
         title: LanguageManager.translate('Hata'),
-        message: LanguageManager.translate('Telefon numarası 11 haneli olmalıdır!'),
+        message: LanguageManager.translate('Geçerli bir telefon numarası giriniz'),
         buttonText: LanguageManager.translate('Tamam'),
       );
       return;
@@ -479,8 +479,7 @@ class _SellerSignupPageState extends State<SellerSignupPage> with TickerProvider
                               keyboardType: TextInputType.phone,
                               focusNode: _phoneFocusNode,
                               isValid: _isPhoneValid,
-                              errorText: LanguageManager.translate('Telefon numarası 11 haneli olmalıdır'),
-                              maxLength: 11,
+                              errorText: LanguageManager.translate('Geçerli bir telefon numarası giriniz'),
                               onChanged: (_) {
                                 _validatePhone();
                                 setState(() {});
@@ -697,4 +696,4 @@ class _SellerSignupPageState extends State<SellerSignupPage> with TickerProvider
       ],
     );
   }
-} 
+}

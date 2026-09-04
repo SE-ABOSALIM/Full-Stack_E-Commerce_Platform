@@ -209,7 +209,7 @@ void main() {
         expect(find.text('E-posta'), findsNothing);
         await tester.enterText(
           find.byKey(const Key('reset-phone')),
-          '+905320000001',
+          '0532 000 00 01',
         );
         await tester.tap(find.text('Kod Gönder'));
         await tester.pumpAndSettle();

@@ -80,7 +80,7 @@ void main() {
         expect(update, {
           'name_surname': 'Updated Buyer',
           'email': userResponse['email'],
-          'phone_number': userResponse['phone_number'],
+          'phone_number': '+905321234567',
         });
         expect(Session.currentUser!.password, isEmpty);
       }, () => client);
@@ -139,7 +139,7 @@ void main() {
       expect(requests, ['POST /verify-phone']);
       expect(bodies, [
         {
-          'phone_number': userResponse['phone_number'],
+          'phone_number': '+905321234567',
           'verification_code': '123456',
         },
       ]);
@@ -206,7 +206,10 @@ void main() {
         requests.map((request) => '${request.method} ${request.url.path}'),
         ['POST /verify-phone', 'POST /users'],
       );
-      expect(jsonDecode(requests.last.body), registration);
+      expect(jsonDecode(requests.last.body), {
+        ...registration,
+        'phone_number': '+905321234567',
+      });
       expect(find.byType(PhoneVerificationPage), findsNothing);
       expect(find.text('Login screen'), findsOneWidget);
     }, () => client);

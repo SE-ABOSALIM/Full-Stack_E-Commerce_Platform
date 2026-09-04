@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../Models/seller.dart';
 import '../Utils/app_config.dart';
+import '../Utils/phone_number.dart';
 
 class SellerApiService {
   static String get baseUrl => AppConfig.baseUrl;
@@ -78,7 +79,7 @@ class SellerApiService {
     request.fields['name'] = name;
     request.fields['email'] = email;
     request.fields['password'] = password;
-    request.fields['phone'] = phone;
+    request.fields['phone'] = normalizePhoneNumber(phone) ?? phone.trim();
     request.fields['store_name'] = storeName;
     if (storeDescription != null) {
       request.fields['store_description'] = storeDescription;
@@ -145,7 +146,9 @@ class SellerApiService {
     // Text fields - sadece null olmayan değerleri gönder
     if (name != null && name.isNotEmpty) request.fields['name'] = name;
     if (email != null && email.isNotEmpty) request.fields['email'] = email;
-    if (phone != null && phone.isNotEmpty) request.fields['phone'] = phone;
+    if (phone != null && phone.isNotEmpty) {
+      request.fields['phone'] = normalizePhoneNumber(phone) ?? phone.trim();
+    }
     if (storeName != null && storeName.isNotEmpty) request.fields['store_name'] = storeName;
     if (storeDescription != null && storeDescription.isNotEmpty) request.fields['store_description'] = storeDescription;
     if (cargoCompany != null && cargoCompany.isNotEmpty) request.fields['cargo_company'] = cargoCompany;
@@ -201,7 +204,7 @@ class SellerApiService {
         Uri.parse('$baseUrl/send-seller-verification-code'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'phone_number': phoneNumber,
+          'phone_number': normalizePhoneNumber(phoneNumber) ?? phoneNumber.trim(),
           'language': language ?? 'tr'
         }),
       ).timeout(const Duration(seconds: 10));
@@ -233,7 +236,7 @@ class SellerApiService {
         Uri.parse('$baseUrl/verify-seller-phone'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'phone_number': phoneNumber,
+          'phone_number': normalizePhoneNumber(phoneNumber) ?? phoneNumber.trim(),
           'verification_code': verificationCode
         }),
       ).timeout(const Duration(seconds: 10));
@@ -255,4 +258,4 @@ class SellerApiService {
       throw Exception('Telefon doğrulanamadı: $e');
     }
   }
-} 
+}

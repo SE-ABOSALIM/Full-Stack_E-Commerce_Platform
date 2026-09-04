@@ -8,6 +8,7 @@ import '../../Services/api_service.dart';
 import '../../Widgets/custom_dialog.dart';
 import '../../Utils/language_manager.dart';
 import '../../Utils/app_config.dart';
+import '../../Utils/phone_number.dart';
 import '../user/verification/phone_verification_page.dart';
 import '../../Models/seller_session.dart';
 
@@ -293,7 +294,10 @@ class _SellerEditProfilePageState extends State<SellerEditProfilePage> {
 
     // Email veya telefon değişikliği kontrolü
     bool emailChanged = _emailController.text != _currentSeller.email;
-    bool phoneChanged = _phoneController.text != _currentSeller.phone;
+    bool phoneChanged = !samePhoneIdentity(
+      _phoneController.text,
+      _currentSeller.phone,
+    );
     
     if (emailChanged || phoneChanged) {
       // Modern uyarı dialog'u göster
@@ -851,6 +855,9 @@ class _SellerEditProfilePageState extends State<SellerEditProfilePage> {
             if (value == null || value.isEmpty) {
               return LanguageManager.translate('Telefon numarası gerekli');
             }
+            if (!isValidPhoneNumber(value)) {
+              return LanguageManager.translate('Geçerli bir telefon numarası giriniz');
+            }
             return null;
           },
         ),
@@ -1325,4 +1332,4 @@ class _SellerEditProfilePageState extends State<SellerEditProfilePage> {
       ),
     );
   }
-} 
+}

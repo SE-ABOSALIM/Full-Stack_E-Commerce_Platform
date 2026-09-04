@@ -12,6 +12,7 @@ import 'package:http/testing.dart';
 
 const password = 'Private-password-789!';
 const phone = '+90 532 765 43 21';
+const canonicalPhone = '+905327654321';
 const email = 'private-buyer@example.com';
 const code = '918273';
 const token = 'private-payment-token';
@@ -33,6 +34,7 @@ void expectSafeLogs(List<String> logs) {
   for (final secret in [
     password,
     phone,
+    canonicalPhone,
     email,
     code,
     token,
@@ -108,11 +110,11 @@ void main() {
         '/verify-seller-phone',
       ]);
       expect(jsonDecode(requests[0].body), {
-        'phone_number': phone,
+        'phone_number': canonicalPhone,
         'language': 'tr',
       });
       expect(jsonDecode(requests[1].body), {
-        'phone_number': phone,
+        'phone_number': canonicalPhone,
         'verification_code': code,
       });
       expectSafeLogs(logs);
