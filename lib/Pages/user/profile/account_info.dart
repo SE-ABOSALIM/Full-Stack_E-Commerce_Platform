@@ -282,14 +282,13 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
       final updatedUser = User(
         id: Session.currentUser!.id,
         nameSurname: _nameController.text,
-        password: Session.currentUser!.password,
+        password: '',
         email: _emailController.text,
         phoneNumber: _phoneController.text,
       );
       
       await ApiService.updateUser(updatedUser.id!, {
         'name_surname': updatedUser.nameSurname,
-        'password': updatedUser.password,
         'email': updatedUser.email,
         'phone_number': updatedUser.phoneNumber,
       });
@@ -442,12 +441,8 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
         builder: (context) => PhoneVerificationPage(
           phoneNumber: Session.currentUser!.phoneNumber,
           userType: 'user',
-          userData: {
-            'name': Session.currentUser!.nameSurname,
-            'email': Session.currentUser!.email,
-            'password': Session.currentUser!.password,
-            'phone': Session.currentUser!.phoneNumber,
-          },
+          userData: const {},
+          isRegistration: false,
         ),
       ),
     ).then((_) {
@@ -859,4 +854,4 @@ class _AccountInfoPageState extends State<AccountInfoPage> {
       ),
     );
   }
-} 
+}

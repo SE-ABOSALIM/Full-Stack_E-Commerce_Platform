@@ -10,12 +10,14 @@ class PhoneVerificationPage extends StatefulWidget {
   final String phoneNumber;
   final String userType; // 'user' veya 'seller'
   final Map<String, dynamic> userData; // Kayıt verileri
+  final bool isRegistration;
   
   const PhoneVerificationPage({
     super.key,
     required this.phoneNumber,
     required this.userType,
     required this.userData,
+    this.isRegistration = true,
   });
 
   @override
@@ -141,6 +143,11 @@ class _PhoneVerificationPageState extends State<PhoneVerificationPage>
           : await ApiService.verifyPhone(widget.phoneNumber, verificationCode);
 
       if (response['success'] == true) {
+        if (!widget.isRegistration) {
+          _isRegistrationCompleted = true;
+          if (mounted) Navigator.of(context).pop();
+          return;
+        }
         // Telefon doğrulandı, şimdi kayıt işlemini tamamla
         await _completeRegistration();
       } else {

@@ -65,7 +65,6 @@ class _TestUsersPageState extends State<TestUsersPage> {
                       children: [
                         Text('Email: ${user.email}'),
                         Text('Telefon: ${user.phoneNumber}'),
-                        Text('Şifre: ${user.password}'),
                       ],
                     ),
                     trailing: IconButton(
