@@ -29,9 +29,10 @@ class ProductUpdate(BaseModel):
 
 # User
 class UserBase(BaseModel):
+    """Public user response; credentials belong only in input schemas."""
+
     id: int
     name_surname: str
-    password: str
     email: str
     phone_number: str
     phone_verified: str
@@ -47,7 +48,7 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     name_surname: str
-    password: str
+    password: Optional[str] = None
     email: str
     phone_number: str
 

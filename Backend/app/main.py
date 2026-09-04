@@ -1,4 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Form, Body
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -25,6 +27,40 @@ load_dotenv(os.path.join(BASE_DIR, "config.env"))
 
 models.Base.metadata.create_all(bind=engine)
 app = FastAPI()
+
+
+def omit_passwords(value):
+    """Remove password fields from echoed validation input, including nested bodies."""
+    if isinstance(value, dict):
+        return {
+            key: omit_passwords(child)
+            for key, child in value.items()
+            if key != "password"
+        }
+    if isinstance(value, list):
+        return [omit_passwords(child) for child in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def password_safe_validation_error(request, exc):
+    errors = []
+    for error in exc.errors():
+        error = dict(error)
+        location = error.get("loc", ())
+        if "password" in location or (
+            tuple(location) == ("body",)
+            and not isinstance(error.get("input"), (dict, list))
+        ):
+            # A rejected password or unparsed body can contain raw credentials.
+            error.pop("input", None)
+        elif "input" in error:
+            error["input"] = omit_passwords(error["input"])
+        errors.append(error)
+    return await request_validation_exception_handler(
+        request, RequestValidationError(errors)
+    )
+
 
 # Statik dosya servisi ekle
 app.mount("/uploads", StaticFiles(directory=os.path.join(BASE_DIR, "uploads")), name="uploads")
@@ -931,7 +967,6 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     return schemas.UserBase(
         id=db_user.id,
         name_surname=db_user.name_surname,
-        password=db_user.password,
         email=db_user.email,
         phone_number=db_user.phone_number,
         phone_verified=db_user.phone_verified,
@@ -947,7 +982,6 @@ def get_users(db: Session = Depends(get_db)):
         schemas.UserBase(
             id=user.id,
             name_surname=user.name_surname,
-            password=user.password,
             email=user.email,
             phone_number=user.phone_number,
             phone_verified=user.phone_verified,
@@ -1077,7 +1111,6 @@ def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(ge
     return schemas.UserBase(
         id=db_user.id,
         name_surname=db_user.name_surname,
-        password=db_user.password,
         email=db_user.email,
         phone_number=db_user.phone_number,
         phone_verified=db_user.phone_verified,
@@ -2858,7 +2891,6 @@ def login_user(email: str = Form(...), password: str = Form(...), db: Session = 
         return schemas.UserBase(
             id=user.id,
             name_surname=user.name_surname,
-            password=user.password,
             email=user.email,
             phone_number=user.phone_number,
             phone_verified=user.phone_verified,
