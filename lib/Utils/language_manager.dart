@@ -7,9 +7,9 @@ class LanguageManager {
   
   // Desteklenen diller ve kodları
   static const Map<String, String> _supportedLanguages = {
+    'en': 'English',
     'tr': 'Türkçe',
     'ar': 'العربية',
-    'en': 'English',
   };
   
   static final Map<String, Map<String, String>> _translations = {
@@ -26,6 +26,7 @@ class LanguageManager {
       'Spor': 'Spor',
       'Oyuncak': 'Oyuncak',
       'Ürün bulunamadı': 'Ürün bulunamadı',
+      'Keşfet': 'Keşfet',
       
       // Sepet
       'Sepetim': 'Sepetim',
@@ -49,6 +50,7 @@ class LanguageManager {
       'Ödeme Yöntemleri': 'Ödeme Yöntemleri',
       'Ayarlar': 'Ayarlar',
       'Çıkış Yap': 'Çıkış Yap',
+      'Takip Ettiğim Satıcılar': 'Takip Ettiğim Satıcılar',
 
       // Ürün Detayı
       'Ürün Detayı': 'Ürün Detayı',
@@ -148,6 +150,8 @@ class LanguageManager {
       'Bilgiler eşleşmiyor! Lütfen girdiğiniz bilgileri kontrol edin.': 'Bilgiler eşleşmiyor! Lütfen girdiğiniz bilgileri kontrol edin.',
       'Şifre değiştirme sırasında bir hata oluştu. Lütfen tekrar deneyin.': 'Şifre değiştirme sırasında bir hata oluştu. Lütfen tekrar deneyin.',
       'Geri dönmek istiyor musunuz? ': 'Geri dönmek istiyor musunuz? ',
+      'Şifreyi Güncelle': 'Şifreyi Güncelle',
+      'Şifrenizi değiştirdikten sonra yeniden giriş yapmanız gerekir.': 'Şifrenizi değiştirdikten sonra yeniden giriş yapmanız gerekir.',
       
       // Kayıt Ol Sayfası
       'Kayıt Başarısız': 'Kayıt Başarısız',
@@ -167,7 +171,9 @@ class LanguageManager {
       'Telefon doğrulanmamış': 'Telefon doğrulanmamış',
       'Telefonu Doğrula': 'Telefonu Doğrula',
       'Hesabınız başarıyla oluşturuldu. Şimdi giriş yapabilirsiniz.': 'Hesabınız başarıyla oluşturuldu. Şimdi giriş yapabilirsiniz.',
-      
+      'Kod Gönder': 'Kod Gönder',
+      'Telefonunuza gönderilen kodla yeni şifrenizi belirleyin.': 'Telefonunuza gönderilen kodla yeni şifrenizi belirleyin.',
+
       // Uyarı ve Değişiklik Mesajları
       'Uyarı': 'Uyarı',
       'Aşağıdaki değişiklikler yapılacak:': 'Aşağıdaki değişiklikler yapılacak:',
@@ -182,7 +188,7 @@ class LanguageManager {
       'Devam Et': 'Devam Et',
       'Email doğrulama durumu sıfırlandı. Lütfen yeni email adresinizi doğrulayın.': 'Email doğrulama durumu sıfırlandı. Lütfen yeni email adresinizi doğrulayın.',
       'Telefon doğrulama kodu yeni numaranıza gönderildi. Lütfen telefon numaranızı doğrulayın.': 'Telefon doğrulama kodu yeni numaranıza gönderildi. Lütfen telefon numaranızı doğrulayın.',
-      
+
       // Başarı Mesajları
       'Giriş Başarılı': 'Giriş Başarılı',
       'Başarıyla giriş yaptınız!': 'Başarıyla giriş yaptınız!',
@@ -214,6 +220,7 @@ class LanguageManager {
       'Sil': 'Sil',
       'Güncelle': 'Güncelle',
       'Ekle': 'Ekle',
+      'Satıcıları takip etmek için satıcı profillerini ziyaret edin': 'Satıcıları takip etmek için satıcı profillerini ziyaret edin',
       
       // Satıcı Dashboard
       'Hızlı İstatistikler': 'Hızlı İstatistikler',
@@ -372,7 +379,8 @@ class LanguageManager {
       // Dialog Mesajları
       'Düzenleme özelliği yakında eklenecek': 'Düzenleme özelliği yakında eklenecek',
       'Favorilerinizi görüntülemek için giriş yapmanız gerekiyor.': 'Favorilerinizi görüntülemek için giriş yapmanız gerekiyor.',
-      
+      'Henüz hiç satıcı takip etmiyorsunuz': 'Henüz hiç satıcı takip etmiyorsunuz',
+
       // Adres Form Alanları
       'Mahalle': 'Mahalle',
       'Sokak': 'Sokak',
@@ -429,10 +437,10 @@ class LanguageManager {
       'Koyu Tema': 'Dark Theme',
       'Koyu renk teması': 'Dark color theme',
       'Güvenlik Ayarları': 'Security Settings',
-      'Şifre Değiştir': 'Change Password',
+      'Şifre Değiştir': 'Şifre Değiştir',
       'Biometrik Giriş': 'Biometric Login',
-      'Mevcut Şifre': 'Current Password',
-      'Yeni Şifre Tekrar': 'Confirm New Password',
+      'Mevcut Şifre': 'Mevcut Şifre',
+      'Yeni Şifre Tekrar': 'Yeni Şifre (Tekrar)',
       'Tahmini Teslimat': 'Tahmini Teslimat',
       'Ürün bilgilerini güncelleyin': 'Ürün bilgilerini güncelleyin',
       'Mağazanıza yeni ürün ekleyin': 'Mağazanıza yeni ürün ekleyin',
@@ -465,6 +473,7 @@ class LanguageManager {
       'Spor': 'Sports',
       'Oyuncak': 'Toys',
       'Ürün bulunamadı': 'No products found',
+      'Keşfet': 'Explore',
       
       // Sepet
       'Sepetim': 'My Cart',
@@ -495,6 +504,7 @@ class LanguageManager {
       'Kayıtlı adreslerinizi yönetin': 'Manage saved addresses',
       'Kart bilgilerinizi yönetin': 'Manage your card details',
       'Uygulama ayarlarınızı yönetin': 'Manage app settings',
+      'Takip Ettiğim Satıcılar': 'Followed Sellers',
 
       // Ürün Detayı
       'Ürün Detayı': 'Product Detail',
@@ -595,6 +605,8 @@ class LanguageManager {
       'Bilgiler eşleşmiyor! Lütfen girdiğiniz bilgileri kontrol edin.': 'Information does not match! Please check the information you entered.',
       'Şifre değiştirme sırasında bir hata oluştu. Lütfen tekrar deneyin.': 'An error occurred while changing the password. Please try again.',
       'Geri dönmek istiyor musunuz? ': 'Do you want to go back? ',
+      'Şifreyi Güncelle': 'Update Password',
+      'Şifrenizi değiştirdikten sonra yeniden giriş yapmanız gerekir.': 'You need to log in again after changing your password.',
       
       // Kayıt Ol Sayfası
       'Kayıt Başarısız': 'Registration Failed',
@@ -614,7 +626,9 @@ class LanguageManager {
       'Telefon doğrulanmamış': 'Phone not verified',
       'Telefonu Doğrula': 'Verify Phone',
       'Hesabınız başarıyla oluşturuldu. Şimdi giriş yapabilirsiniz.': 'Your account has been successfully created. You can now login.',
-      
+      'Kod Gönder': 'Send message',
+      'Telefonunuza gönderilen kodla yeni şifrenizi belirleyin.': 'Set your new password using the code sent to your phone.',
+
       // Uyarı ve Değişiklik Mesajları
       'Uyarı': 'Warning',
       'Aşağıdaki değişiklikler yapılacak:': 'The following changes will be made:',
@@ -661,6 +675,7 @@ class LanguageManager {
       'Sil': 'Delete',
       'Güncelle': 'Update',
       'Ekle': 'Add',
+      'Satıcıları takip etmek için satıcı profillerini ziyaret edin': 'Visit seller profiles to follow them.',
       
       // Satıcı Dashboard
       'Hızlı İstatistikler': 'Quick Statistics',
@@ -821,7 +836,8 @@ class LanguageManager {
       // Dialog Mesajları
       'Düzenleme özelliği yakında eklenecek': 'Edit feature will be added soon',
       'Favorilerinizi görüntülemek için giriş yapmanız gerekiyor.': 'You need to login to view your favorites.',
-      
+      'Henüz hiç satıcı takip etmiyorsunuz': "You aren't following any sellers yet.",
+
       // Adres Form Alanları
       'Mahalle': 'Neighborhood',
       'Sokak': 'Street',
@@ -927,6 +943,7 @@ class LanguageManager {
       'Spor': 'رياضة',
       'Oyuncak': 'ألعاب',
       'Ürün bulunamadı': 'لم يتم العثور على منتجات',
+      'Keşfet': 'اكتشف',
       
       // Sepet
       'Sepetim': 'سلة التسوق',
@@ -957,6 +974,7 @@ class LanguageManager {
       'Kayıtlı adreslerinizi yönetin': 'إدارة العناوين المحفوظة',
       'Kart bilgilerinizi yönetin': 'إدارة معلومات البطاقة',
       'Uygulama ayarlarınızı yönetin': 'إدارة إعدادات التطبيق',
+      'Takip Ettiğim Satıcılar': 'البائعون المتابعون',
       
       // Ürün Detayı
       'Ürün Detayı': 'تفاصيل المنتج',
@@ -1005,6 +1023,8 @@ class LanguageManager {
       'Hesabınız başarıyla oluşturuldu!': 'تم إنشاء حسابك بنجاح!',
       'Zaten hesabınız var mı?': 'لديك حساب بالفعل؟',
       'Giriş Yapın': 'تسجيل الدخول',
+      'Kod Gönder': 'ارسل الرمز',
+      'Telefonunuza gönderilen kodla yeni şifrenizi belirleyin.': 'قم بتعيين كلمة المرور الجديدة باستخدام الرمز المرسل إلى هاتفك.',
       
       // Ödeme Sayfası
       'Ödeme': 'الدفع',
@@ -1181,6 +1201,8 @@ class LanguageManager {
       'Bilgiler eşleşmiyor! Lütfen girdiğiniz bilgileri kontrol edin.': 'المعلومات غير متطابقة! يرجى التحقق من المعلومات التي أدخلتها.',
       'Şifre değiştirme sırasında bir hata oluştu. Lütfen tekrar deneyin.': 'حدث خطأ أثناء تغيير كلمة المرور. يرجى المحاولة مرة أخرى.',
       'Geri dönmek istiyor musunuz? ': 'هل تريد العودة؟ ',
+      'Şifreyi Güncelle': 'حفظ كلمة السر',
+      'Şifrenizi değiştirdikten sonra yeniden giriş yapmanız gerekir.': 'يجب تسجيل الدخول مرة أخرى بعد تغيير كلمة المرور.',
 
       // Başarı Mesajları
       'Giriş Başarılı': 'تم تسجيل الدخول بنجاح',
@@ -1206,6 +1228,7 @@ class LanguageManager {
       'Sil': 'حذف',
       'Güncelle': 'تحديث',
       'Ekle': 'إضافة',
+      'Satıcıları takip etmek için satıcı profillerini ziyaret edin': 'قم بزيارة متاجر البائعين لمتابعتهم.',
       
       // Satıcı Dashboard
       'Onaylı': 'موافق عليه',
@@ -1333,7 +1356,8 @@ class LanguageManager {
       // Dialog Mesajları
       'Düzenleme özelliği yakında eklenecek': 'ستتم إضافة ميزة التعديل قريباً',
       'Favorilerinizi görüntülemek için giriş yapmanız gerekiyor.': 'يجب عليك تسجيل الدخول لعرض المفضلة.',
-      
+      'Henüz hiç satıcı takip etmiyorsunuz': 'أنت لا تتابع أي بائعين بعد.',
+
       // Adres Form Alanları
       'Mahalle': 'الحي',
       'Sokak': 'الشارع',
@@ -1439,7 +1463,7 @@ class LanguageManager {
     return translations?[key] ?? key;
   }
 
-  static List<String> get availableLanguages => ['Türkçe', 'English', 'العربية'];
+  static List<String> get availableLanguages => ['English', 'Türkçe', 'العربية'];
   
   // Dil kodunu döndüren fonksiyon
   static String getLanguageCode(String languageName) {

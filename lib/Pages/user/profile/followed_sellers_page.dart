@@ -235,7 +235,7 @@ class _FollowedSellersPageState extends State<FollowedSellersPage> {
                                     ),
                                     const SizedBox(width: 8),
                                     Text(
-                                      'Keşfet',
+                                      LanguageManager.translate('Keşfet'),
                                       style: const TextStyle(
                                         color: Colors.white,
                                         fontSize: 16,
