@@ -6,6 +6,7 @@ from datetime import datetime
 class Address(Base):
     __tablename__ = "address"
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     city = Column(String)
     district = Column(String)
     neighbourhood = Column(String)
@@ -31,6 +32,7 @@ class CreditCard(Base):
 class Order(Base):
     __tablename__ = "order"
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     order_code = Column(String)
     order_created_date = Column(DateTime)
     order_estimated_delivery = Column(DateTime)
@@ -94,6 +96,7 @@ class Seller(Base):
     store_logo_url = Column(String, nullable=True)
     cargo_company = Column(String, default="Araskargo")
     is_verified = Column(String, default="pending")
+    followers_count = Column(Integer, nullable=False, default=0)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -161,3 +164,16 @@ class UsersSellers(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     seller_id = Column(Integer, ForeignKey("sellers.id", ondelete="CASCADE"))
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
+
+
+class PasswordResetVerification(Base):
+    """Dedicated purpose: registration and phone-change codes never enter this table."""
+    __tablename__ = "password_reset_verifications"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    phone_number = Column(String, nullable=False)
+    code_hash = Column(String, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    consumed_at = Column(DateTime, nullable=True)

@@ -33,7 +33,8 @@ def assert_no_password(value, *secrets):
 def assert_public_user(response, stored_password):
     assert response.status_code == 200, response.text
     body = response.json()
-    assert set(body) == PUBLIC_FIELDS
+    expected = PUBLIC_FIELDS | ({"access_token", "token_type"} if response.request.url.path.endswith("/login") else set())
+    assert set(body) == expected
     assert_no_password(body, PASSWORD, NEW_PASSWORD, stored_password)
     assert body["email"] == USER_INPUT["email"]
     assert body["phone_number"] == USER_INPUT["phone_number"]
@@ -92,16 +93,15 @@ def test_user_list_excludes_hashes_and_legacy_passwords(client, db, user, legacy
     assert_no_password(response.json(), PASSWORD, user.password)
 
 
-def test_password_update_and_subsequent_login(client, backend, db, user):
+def test_password_update_and_subsequent_login(client, backend, db, user, auth_headers):
     old_hash = user.password
-    response = client.put(f"/users/{user.id}", json={
-        **USER_INPUT, "password": NEW_PASSWORD, "name_surname": "Updated Buyer",
+    response = client.put("/users/me/password", headers=auth_headers(user), json={
+        "current_password": PASSWORD, "new_password": NEW_PASSWORD, "new_password_again": NEW_PASSWORD,
     })
+    assert response.status_code == 200
     db.refresh(user)
-    body = assert_public_user(response, user.password)
-    assert body["name_surname"] == "Updated Buyer"
+    assert_no_password(response.json(), PASSWORD, NEW_PASSWORD, user.password)
     assert user.password not in (old_hash, NEW_PASSWORD)
-    assert ":" in user.password
     assert backend.verify_password(NEW_PASSWORD, user.password)
     assert_public_user(client.post("/users/login", data={
         "email": user.email, "password": NEW_PASSWORD,
@@ -111,9 +111,9 @@ def test_password_update_and_subsequent_login(client, backend, db, user):
     }).status_code == 401
 
 
-def test_profile_update_without_password_preserves_hash(client, db, user):
+def test_profile_update_without_password_preserves_hash(client, db, user, auth_headers):
     old_hash = user.password
-    response = client.put(f"/users/{user.id}", json={
+    response = client.put(f"/users/{user.id}", headers=auth_headers(user), json={
         key: ("Updated Buyer" if key == "name_surname" else value)
         for key, value in USER_INPUT.items() if key != "password"
     })
@@ -156,8 +156,15 @@ def test_authentication_failure_unchanged(client, user, email, password):
     ("post", "/users", '{"password":"' + PASSWORD + '"}'),
     ("post", "/products", {"nested": {"password": PASSWORD}}),
 ])
-def test_validation_errors_do_not_echo_passwords(client, method, path, payload):
-    response = client.request(method, path, json=payload)
+def test_validation_errors_do_not_echo_passwords(client, backend, db, user, auth_headers, method, path, payload):
+    actor = user
+    role = "user"
+    if path == "/products":
+        actor = backend.models.Seller(name="Seller", email="seller@example.com", phone="+905320000000", password=backend.hash_password(PASSWORD), store_name="Store")
+        db.add(actor)
+        db.commit()
+        role = "seller"
+    response = client.request(method, path, headers=auth_headers(actor, role=role), json=payload)
     assert response.status_code == 422
     assert response.json()["detail"]
     # Error locations may name the password field, but never contain its value.
@@ -214,5 +221,5 @@ def test_openapi_response_schemas_exclude_password(client):
                 walk_response(response, set())
     assert set(schemas["UserBase"]["properties"]) == PUBLIC_FIELDS
     assert "password" in schemas["UserCreate"]["required"]
-    assert "password" in schemas["UserUpdate"]["properties"]
+    assert "password" not in schemas["UserUpdate"]["properties"]
     assert "password" not in schemas["UserUpdate"]["required"]

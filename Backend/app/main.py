@@ -2,8 +2,9 @@ from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Form, Bod
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, case, func
 from app.db import SessionLocal, engine
 import app.models as models
 import app.schemas as schemas
@@ -16,6 +17,9 @@ from datetime import datetime, timedelta
 import base64
 import hashlib
 import hmac
+import secrets
+import re
+from app.auth import issue_access_token, read_access_token, password_stamp, signing_key
 from app.services.twilio_sms_service import twilio_sms_service
 from app.services.sms_language_manager import sms_language_manager
 from app.services.email_service import email_service
@@ -29,13 +33,17 @@ models.Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
 
+SENSITIVE_FIELDS = {"password", "current_password", "new_password", "new_password_again", "verification_code",
+                    "access_token", "authorization", "card_token", "card_number", "cvc"}
+
+
 def omit_passwords(value):
     """Remove password fields from echoed validation input, including nested bodies."""
     if isinstance(value, dict):
         return {
             key: omit_passwords(child)
             for key, child in value.items()
-            if key != "password"
+            if str(key).lower() not in SENSITIVE_FIELDS
         }
     if isinstance(value, list):
         return [omit_passwords(child) for child in value]
@@ -48,7 +56,7 @@ async def password_safe_validation_error(request, exc):
     for error in exc.errors():
         error = dict(error)
         location = error.get("loc", ())
-        if "password" in location or (
+        if any(str(part).lower() in SENSITIVE_FIELDS for part in location) or (
             tuple(location) == ("body",)
             and not isinstance(error.get("input"), (dict, list))
         ):
@@ -71,6 +79,198 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+bearer = HTTPBearer(auto_error=False)
+
+
+def current_actor(credentials: HTTPAuthorizationCredentials = Depends(bearer), db: Session = Depends(get_db)):
+    if credentials is None:
+        raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": "Bearer"})
+    claims = read_access_token(credentials.credentials)
+    model = models.User if claims["role"] == "user" else models.Seller
+    actor = db.get(model, claims["id"])
+    if actor is None or not hmac.compare_digest(claims["stamp"], password_stamp(actor.password)):
+        raise HTTPException(401, "Invalid or expired credentials", headers={"WWW-Authenticate": "Bearer"})
+    return actor
+
+
+def current_user(actor=Depends(current_actor)):
+    if not isinstance(actor, models.User):
+        raise HTTPException(403, "User credentials required")
+    return actor
+
+
+def optional_actor(credentials: HTTPAuthorizationCredentials = Depends(bearer), db: Session = Depends(get_db)):
+    return current_actor(credentials, db) if credentials else None
+
+
+def current_seller(actor=Depends(current_actor)):
+    if not isinstance(actor, models.Seller):
+        raise HTTPException(403, "Seller credentials required")
+    return actor
+
+
+def require_owner(owner_id, actor):
+    if owner_id != actor.id:
+        raise HTTPException(403, "Resource belongs to another account")
+
+
+def owned_resource(db, model, resource_id, actor, owner_field="user_id"):
+    resource = db.get(model, resource_id)
+    if resource is None:
+        raise HTTPException(404, "Resource not found")
+    require_owner(getattr(resource, owner_field), actor)
+    return resource
+
+
+def normalize_phone(phone):
+    phone = re.sub(r"[\s()-]", "", phone)
+    if phone.startswith("0"):
+        phone = "+90" + phone[1:]
+    elif not phone.startswith("+"):
+        phone = "+" + phone
+    if not re.fullmatch(r"\+[1-9][0-9]{7,14}", phone):
+        raise HTTPException(422, "Invalid phone number")
+    return phone
+
+
+def account_for_reset(db, phone):
+    # Legacy profiles used several phone formats; never pick arbitrarily if duplicated.
+    matches = []
+    for user in db.query(models.User).all():
+        try:
+            if normalize_phone(user.phone_number or "") == phone:
+                matches.append(user)
+        except HTTPException:
+            continue
+    return matches[0] if len(matches) == 1 else None
+
+
+def ensure_user_contacts_available(db, phone, email, except_id=None):
+    normalized = normalize_phone(phone)
+    for user in db.query(models.User).filter(models.User.id != except_id).all():
+        if user.email == email:
+            raise HTTPException(400, "Email is already registered")
+        try:
+            other_phone = normalize_phone(user.phone_number or "")
+        except HTTPException:
+            continue
+        if other_phone == normalized:
+            raise HTTPException(400, "Phone number is already registered")
+
+
+def phone_verification_owner(db, phone, role, actor):
+    model = models.User if role == "user" else models.Seller
+    field = "phone_number" if role == "user" else "phone"
+    matches = db.query(model).filter(getattr(model, field) == phone).all()
+    if not matches:
+        return None  # Public registration challenge, not an existing account mutation.
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    if not isinstance(actor, model):
+        raise HTTPException(403, "Wrong account type")
+    for account in matches:
+        require_owner(account.id, actor)
+    return matches[0]
+
+
+def reset_code_hash(phone, code):
+    return hmac.new(signing_key(), ("password-reset:" + phone + ":" + code).encode(), hashlib.sha256).hexdigest()
+
+
+def public_user(user):
+    return schemas.UserBase(
+        id=user.id, name_surname=user.name_surname, email=user.email,
+        phone_number=user.phone_number, phone_verified=user.phone_verified,
+        email_verified=user.email_verified,
+        created_at=user.created_at.isoformat() if user.created_at else "",
+        updated_at=user.updated_at.isoformat() if user.updated_at else "",
+    )
+
+
+@app.get("/users/me", response_model=schemas.UserBase)
+def get_my_profile(actor=Depends(current_user)):
+    return public_user(actor)
+
+
+@app.put("/users/me", response_model=schemas.UserBase)
+def update_my_profile(user: schemas.UserUpdate, actor=Depends(current_user), db: Session = Depends(get_db)):
+    return update_user(actor.id, user, db, actor)
+
+
+@app.put("/users/me/password")
+def change_password(payload: schemas.PasswordChange, actor=Depends(current_user), db: Session = Depends(get_db)):
+    if not verify_password(payload.current_password, actor.password):
+        raise HTTPException(401, "Current password is incorrect")
+    if payload.new_password != payload.new_password_again:
+        raise HTTPException(400, "New password and confirmation must match")
+    actor.password = hash_password(payload.new_password)
+    db.query(models.PasswordResetVerification).filter_by(user_id=actor.id).delete()
+    db.commit()
+    return {"message": "Password changed; please sign in again"}
+
+
+@app.post("/auth/forgot-password/request")
+def request_password_reset(payload: schemas.PasswordResetRequest, db: Session = Depends(get_db)):
+    phone = normalize_phone(payload.phone_number)
+    user = account_for_reset(db, phone)
+    result = {"message": "If an account matches, a verification code has been sent", "success": True}
+    if user is None:
+        return result
+    # Serialize requests for this account in PostgreSQL; each resend replaces the old code.
+    db.query(models.User).filter_by(id=user.id).with_for_update().one()
+    challenge = db.query(models.PasswordResetVerification).filter_by(user_id=user.id).first()
+    now = datetime.utcnow()
+    if challenge and challenge.created_at > now - timedelta(seconds=60):
+        return result
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    if challenge is None:
+        challenge = models.PasswordResetVerification(user_id=user.id)
+        db.add(challenge)
+    challenge.phone_number = phone
+    challenge.code_hash = reset_code_hash(phone, code)
+    challenge.attempts = 0
+    challenge.created_at = now
+    challenge.expires_at = now + timedelta(minutes=5)
+    challenge.consumed_at = None
+    db.flush()
+    if not send_sms_verification(phone, code, "tr"):
+        db.rollback()
+        raise HTTPException(503, "Verification message could not be sent")
+    db.commit()
+    return result
+
+
+@app.post("/auth/forgot-password/reset")
+def reset_password(payload: schemas.PasswordReset, db: Session = Depends(get_db)):
+    phone = normalize_phone(payload.phone_number)
+    user = account_for_reset(db, phone)
+    challenge = (db.query(models.PasswordResetVerification).filter_by(user_id=user.id).first()
+                 if user else None)
+    now = datetime.utcnow()
+    invalid = HTTPException(400, "Invalid or expired verification code; request a new code")
+    if (challenge is None or challenge.phone_number != phone or challenge.consumed_at is not None
+            or challenge.expires_at <= now or challenge.attempts >= 3):
+        raise invalid
+    # Conditional UPDATE makes attempt limits and consumption atomic, including on SQLite.
+    available = db.query(models.PasswordResetVerification).filter(
+        models.PasswordResetVerification.id == challenge.id,
+        models.PasswordResetVerification.code_hash == challenge.code_hash,
+        models.PasswordResetVerification.consumed_at.is_(None),
+        models.PasswordResetVerification.expires_at > now,
+        models.PasswordResetVerification.attempts < 3,
+    )
+    if not hmac.compare_digest(challenge.code_hash, reset_code_hash(phone, payload.verification_code)):
+        available.update({"attempts": models.PasswordResetVerification.attempts + 1}, synchronize_session=False)
+        db.commit()
+        raise invalid
+    if available.update({"consumed_at": now}, synchronize_session=False) != 1:
+        db.rollback()
+        raise invalid
+    user.password = hash_password(payload.new_password)
+    db.commit()
+    return {"message": "Password reset; please sign in", "success": True}
 
 # --- PASSWORD HASHING HELPERS ---
 PBKDF2_ITERATIONS = 100_000
@@ -115,8 +315,36 @@ def verify_password(plain_password: str, stored_password: str) -> bool:
         return False
 
 # --- PAYMENT TOKENIZATION MOCK (replace with iyzico/iyzipay or similar in prod) ---
+def card_response(card):
+    return schemas.CreditCardBase(
+        id=card.id, user_id=card.user_id, provider=card.provider,
+        card_token=card.card_token, card_brand=card.card_brand, last4=card.last4,
+        expiry_month=card.expiry_month, expiry_year=card.expiry_year,
+        is_default=card.is_default,
+        created_at=card.created_at.isoformat() if card.created_at else None,
+        updated_at=card.updated_at.isoformat() if card.updated_at else None,
+    )
+
+
+def remember_tokenized_card(db, actor, **data):
+    if not data.get("card_token"):
+        raise HTTPException(400, "Card tokenization failed")
+    card = db.query(models.CreditCard).filter_by(card_token=data["card_token"]).first()
+    if card is not None:
+        require_owner(card.user_id, actor)
+    else:
+        card = models.CreditCard(
+            **data, user_id=actor.id,
+            provider="mock" if data["card_token"].startswith("mock_") else "iyzico",
+        )
+        db.add(card)
+    db.commit()
+    return schemas.TokenizeCardResponse(**data)
+
+
 @app.post("/tokenize", response_model=schemas.TokenizeCardResponse)
-def tokenize_card(req: schemas.TokenizeCardRequest, db: Session = Depends(get_db)):
+def tokenize_card(req: schemas.TokenizeCardRequest, db: Session = Depends(get_db), actor=Depends(current_user)):
+    require_owner(req.user_id, actor)
     # Basit validasyonlar (gerçek dünyada iyzico gibi bir gateway ile doğrulayın)
     digits = ''.join([c for c in req.card_number if c.isdigit()])
     if len(digits) < 12 or len(digits) > 19:
@@ -177,7 +405,7 @@ def tokenize_card(req: schemas.TokenizeCardRequest, db: Session = Depends(get_db
     # Geliştirme ortamı veya eksik anahtarlar için mock token üret
     if test_mode or placeholder_keys:
         mock_token = f"mock_{uuid.uuid4().hex}"
-        return schemas.TokenizeCardResponse(
+        return remember_tokenized_card(db, actor,
             card_token=mock_token,
             card_brand=brand,
             last4=digits[-4:],
@@ -232,7 +460,7 @@ def tokenize_card(req: schemas.TokenizeCardRequest, db: Session = Depends(get_db
         card_token = data.get('cardToken')
         merged_token = f"{card_user_key}:{card_token}" if card_user_key and card_token else card_token
         
-        return schemas.TokenizeCardResponse(
+        return remember_tokenized_card(db, actor,
             card_token=merged_token,
             card_brand=brand,
             last4=digits[-4:],
@@ -242,7 +470,7 @@ def tokenize_card(req: schemas.TokenizeCardRequest, db: Session = Depends(get_db
     except ImportError:
         # SDK yoksa da mock token üret, kullanıcıya gerçek ortam için uyarı ver
         mock_token = f"mock_{uuid.uuid4().hex}"
-        return schemas.TokenizeCardResponse(
+        return remember_tokenized_card(db, actor,
             card_token=mock_token,
             card_brand=brand,
             last4=digits[-4:],
@@ -254,7 +482,12 @@ def tokenize_card(req: schemas.TokenizeCardRequest, db: Session = Depends(get_db
 
 # --- CHARGE PAYMENT ---
 @app.post("/charge", response_model=schemas.ChargeResponse)
-def charge_payment(req: schemas.ChargeRequest, db: Session = Depends(get_db)):
+def charge_payment(req: schemas.ChargeRequest, db: Session = Depends(get_db), actor=Depends(current_user)):
+    require_owner(req.user_id, actor)
+    card = db.query(models.CreditCard).filter_by(card_token=req.card_token).first()
+    if card is None:
+        raise HTTPException(404, "Credit card not found")
+    require_owner(card.user_id, actor)
     import os, json
     api_key = os.getenv('IYZIPAY_API_KEY')
     secret_key = os.getenv('IYZIPAY_SECRET_KEY')
@@ -345,6 +578,18 @@ def delete_file_safely(file_path: str, file_type: str = "dosya"):
     except Exception as e:
         return False
 
+
+def delete_unreferenced_product_image(db, image_url, product_id):
+    # A seller may reuse a public image URL; that does not authorize deleting
+    # an image still referenced by another product (or a path outside uploads).
+    filename = image_url.rsplit("/", 1)[-1]
+    if not filename or "\\" in filename or ":" in filename or filename in (".", ".."):
+        return
+    other_images = db.query(models.Product.product_image_url).filter(models.Product.id != product_id).all()
+    if any(url and url.rsplit("/", 1)[-1] == filename for (url,) in other_images):
+        return
+    delete_file_safely(os.path.join("uploads", "Product_Image", filename), "Product image")
+
 def generate_verification_code():
     """6 haneli doğrulama kodu oluştur"""
     return ''.join(random.choices(string.digits, k=6))
@@ -407,7 +652,10 @@ def validate_phone_number(phone_number: str):
 
 # --- PRODUCT CRUD ---
 @app.post("/products", response_model=schemas.ProductBase)
-def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db)):
+def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db), actor=Depends(current_seller)):
+    if product.seller_id is not None:
+        require_owner(product.seller_id, actor)
+    product.seller_id = actor.id
     db_product = models.Product(**product.dict())
     db.add(db_product)
     db.commit()
@@ -439,7 +687,11 @@ def get_products(db: Session = Depends(get_db)):
     ]
 
 @app.put("/products/{product_id}", response_model=schemas.ProductBase)
-def update_product(product_id: int, product: schemas.ProductUpdate, db: Session = Depends(get_db)):
+def update_product(product_id: int, product: schemas.ProductUpdate, db: Session = Depends(get_db), actor=Depends(current_seller)):
+    owned_resource(db, models.Product, product_id, actor, "seller_id")
+    if product.seller_id is not None:
+        require_owner(product.seller_id, actor)
+    product.seller_id = actor.id
     db_product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if not db_product:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -453,9 +705,7 @@ def update_product(product_id: int, product: schemas.ProductUpdate, db: Session 
 
     # Eğer fotoğraf değiştiyse eski fotoğrafı sil
     if old_image_url and old_image_url != db_product.product_image_url:
-        file_name = old_image_url.split('/')[-1]
-        file_path = f"uploads/Product_Image/{file_name}"
-        delete_file_safely(file_path, "Eski ürün fotoğrafı")
+        delete_unreferenced_product_image(db, old_image_url, product_id)
 
     db.commit()
     db.refresh(db_product)
@@ -470,16 +720,15 @@ def update_product(product_id: int, product: schemas.ProductUpdate, db: Session 
     )
 
 @app.delete("/products/{product_id}")
-def delete_product(product_id: int, db: Session = Depends(get_db)):
+def delete_product(product_id: int, db: Session = Depends(get_db), actor=Depends(current_seller)):
+    owned_resource(db, models.Product, product_id, actor, "seller_id")
     db_product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if not db_product:
         raise HTTPException(status_code=404, detail="Product not found")
 
     # Ürün fotoğrafını sil
     if db_product.product_image_url:
-        file_name = db_product.product_image_url.split('/')[-1]
-        file_path = f"uploads/Product_Image/{file_name}"
-        delete_file_safely(file_path, "Ürün fotoğrafı")
+        delete_unreferenced_product_image(db, db_product.product_image_url, product_id)
 
     # Ürünü veritabanından sil
     db.delete(db_product)
@@ -584,8 +833,9 @@ def send_verification_code(verification: schemas.PhoneVerificationCreate, db: Se
         raise HTTPException(status_code=500, detail=f"Response oluşturulamadı: {str(e)}")
 
 @app.post("/verify-phone", response_model=schemas.PhoneVerificationResponse)
-def verify_phone(verification: schemas.PhoneVerificationVerify, db: Session = Depends(get_db)):
+def verify_phone(verification: schemas.PhoneVerificationVerify, db: Session = Depends(get_db), actor=Depends(optional_actor)):
     """Telefon numarası doğrulama kodunu doğrula"""
+    account = phone_verification_owner(db, verification.phone_number, "user", actor)
 
     # Doğrulama kaydını bul
     db_verification = db.query(models.PhoneVerification).filter(
@@ -625,6 +875,8 @@ def verify_phone(verification: schemas.PhoneVerificationVerify, db: Session = De
 
     # Doğrulama başarılı
     db_verification.is_verified = "verified"
+    if account is not None:
+        account.phone_verified = "verified"
     db.commit()
 
     return schemas.PhoneVerificationResponse(
@@ -633,8 +885,9 @@ def verify_phone(verification: schemas.PhoneVerificationVerify, db: Session = De
     )
 
 @app.post("/users/{user_id}/send-phone-verification", response_model=schemas.PhoneVerificationResponse)
-def send_user_phone_verification(user_id: int, db: Session = Depends(get_db)):
+def send_user_phone_verification(user_id: int, db: Session = Depends(get_db), actor=Depends(current_user)):
     """Mevcut kullanıcının kayıtlı telefonuna doğrulama kodu gönder"""
+    owned_resource(db, models.User, user_id, actor, "id")
     # Kullanıcıyı bul
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
@@ -700,118 +953,16 @@ def send_user_phone_verification(user_id: int, db: Session = Depends(get_db)):
 
 # --- SMS ENDPOINTS ---
 @app.post("/sms/welcome")
-def send_welcome_sms(phone_number: str, language: str = None, user_name: str = ""):
-    """Hoş geldin SMS'i gönder (çok dilli)"""
-    try:
-        # Telefon numarasını formatla
-        formatted_phone = phone_number
-        if phone_number.startswith('0'):
-            formatted_phone = '+90' + phone_number[1:]
-        elif not phone_number.startswith('+'):
-            formatted_phone = '+' + phone_number
-
-        # Dil belirtilmemişse telefon numarasından tahmin et
-        if not language:
-            language = sms_language_manager.get_language_from_phone(formatted_phone)
-
-
-        # Hoş geldin SMS'i gönder
-        result = twilio_sms_service.send_welcome_sms(formatted_phone, language, user_name)
-
-        if result['success']:
-            return {
-                "success": True,
-                "message": "Hoş geldin SMS'i gönderildi",
-                "brand_name": result['brand_name'],
-                "language": result['language']
-            }
-        else:
-            return {
-                "success": False,
-                "message": f"SMS gönderilemedi: {result['message']}"
-            }
-
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Hata: {str(e)}"
-        }
+def send_welcome_sms(phone_number: str, language: str = None, user_name: str = "", actor=Depends(current_actor)):
+    raise HTTPException(403, "Direct SMS utilities are disabled; use the application workflow")
 
 @app.post("/sms/order-status")
-def send_order_status_sms(phone_number: str, order_number: str, status: str, language: str = None):
-    """Sipariş durumu SMS'i gönder (çok dilli)"""
-    try:
-        # Telefon numarasını formatla
-        formatted_phone = phone_number
-        if phone_number.startswith('0'):
-            formatted_phone = '+90' + phone_number[1:]
-        elif not phone_number.startswith('+'):
-            formatted_phone = '+' + phone_number
-
-        # Dil belirtilmemişse telefon numarasından tahmin et
-        if not language:
-            language = sms_language_manager.get_language_from_phone(formatted_phone)
-
-
-        # Sipariş durumu SMS'i gönder
-        result = twilio_sms_service.send_order_status_sms(formatted_phone, order_number, status, language)
-
-        if result['success']:
-            return {
-                "success": True,
-                "message": "Sipariş durumu SMS'i gönderildi",
-                "brand_name": result['brand_name'],
-                "language": result['language']
-            }
-        else:
-            return {
-                "success": False,
-                "message": f"SMS gönderilemedi: {result['message']}"
-            }
-
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Hata: {str(e)}"
-        }
+def send_order_status_sms(phone_number: str, order_number: str, status: str, language: str = None, actor=Depends(current_actor)):
+    raise HTTPException(403, "Direct SMS utilities are disabled; use the application workflow")
 
 @app.post("/sms/promotional")
-def send_promotional_sms(phone_number: str, discount: str, valid_until: str, language: str = None):
-    """Promosyon SMS'i gönder (çok dilli)"""
-    try:
-        # Telefon numarasını formatla
-        formatted_phone = phone_number
-        if phone_number.startswith('0'):
-            formatted_phone = '+90' + phone_number[1:]
-        elif not phone_number.startswith('+'):
-            formatted_phone = '+' + phone_number
-
-        # Dil belirtilmemişse telefon numarasından tahmin et
-        if not language:
-            language = sms_language_manager.get_language_from_phone(formatted_phone)
-
-
-        # Promosyon SMS'i gönder
-        result = twilio_sms_service.send_promotional_sms(formatted_phone, discount, valid_until, language)
-
-        if result['success']:
-            return {
-                "success": True,
-                "message": "Promosyon SMS'i gönderildi",
-                "brand_name": result['brand_name'],
-                "language": result['language']
-            }
-        else:
-            return {
-                "success": False,
-                "message": f"SMS gönderilemedi: {result['message']}"
-            }
-
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Hata: {str(e)}"
-        }
+def send_promotional_sms(phone_number: str, discount: str, valid_until: str, language: str = None, actor=Depends(current_actor)):
+    raise HTTPException(403, "Direct SMS utilities are disabled; use the application workflow")
 
 @app.get("/sms/languages")
 def get_supported_languages():
@@ -839,6 +990,7 @@ def check_sender_id_support():
 # --- USER CRUD ---
 @app.post("/users", response_model=schemas.UserBase)
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    ensure_user_contacts_available(db, user.phone_number, user.email)
 
     # Telefon numarasını backend formatına çevir
     formatted_phone = user.phone_number
@@ -939,10 +1091,15 @@ def get_users(db: Session = Depends(get_db)):
     ]
 
 @app.put("/users/{user_id}", response_model=schemas.UserBase)
-def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(get_db)):
+def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.User, user_id, actor, "id")
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    ensure_user_contacts_available(db, user.phone_number, user.email, actor.id)
+    if user.phone_number != actor.phone_number:
+        db.query(models.PasswordResetVerification).filter_by(user_id=actor.id).delete()
 
     # Email değişikliği kontrolü
     if user.email and user.email != db_user.email:
@@ -1035,10 +1192,7 @@ def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(ge
     # Diğer alanları güncelle
     for key, value in user.dict().items():
         if value is not None:
-            if key == "password":
-                setattr(db_user, key, hash_password(value))
-            else:
-                setattr(db_user, key, value)
+            setattr(db_user, key, value)
 
     db_user.updated_at = datetime.now()
     db.commit()
@@ -1056,7 +1210,8 @@ def update_user(user_id: int, user: schemas.UserUpdate, db: Session = Depends(ge
     )
 
 @app.delete("/users/{user_id}")
-def delete_user(user_id: int, db: Session = Depends(get_db)):
+def delete_user(user_id: int, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.User, user_id, actor, "id")
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -1066,19 +1221,20 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
 
 # --- ADDRESS CRUD ---
 @app.post("/address", response_model=schemas.AddressBase)
-def create_address(address: schemas.AddressCreate, db: Session = Depends(get_db)):
-    db_address = models.Address(**address.dict())
+def create_address(address: schemas.AddressCreate, db: Session = Depends(get_db), actor=Depends(current_user)):
+    db_address = models.Address(**address.dict(), user_id=actor.id)
     db.add(db_address)
     db.commit()
     db.refresh(db_address)
     return db_address
 
 @app.get("/address", response_model=list[schemas.AddressBase])
-def get_addresses(db: Session = Depends(get_db)):
-    return db.query(models.Address).all()
+def get_addresses(db: Session = Depends(get_db), actor=Depends(current_user)):
+    return db.query(models.Address).filter_by(user_id=actor.id).all()
 
 @app.put("/address/{address_id}", response_model=schemas.AddressBase)
-def update_address(address_id: int, address: schemas.AddressUpdate, db: Session = Depends(get_db)):
+def update_address(address_id: int, address: schemas.AddressUpdate, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.Address, address_id, actor)
     db_address = db.query(models.Address).filter(models.Address.id == address_id).first()
     if not db_address:
         raise HTTPException(status_code=404, detail="Address not found")
@@ -1089,7 +1245,8 @@ def update_address(address_id: int, address: schemas.AddressUpdate, db: Session 
     return db_address
 
 @app.delete("/address/{address_id}")
-def delete_address(address_id: int, db: Session = Depends(get_db)):
+def delete_address(address_id: int, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.Address, address_id, actor)
     db_address = db.query(models.Address).filter(models.Address.id == address_id).first()
     if not db_address:
         raise HTTPException(status_code=404, detail="Address not found")
@@ -1099,49 +1256,20 @@ def delete_address(address_id: int, db: Session = Depends(get_db)):
 
 # --- CREDIT CARD CRUD (tokenized) ---
 @app.post("/credit_card", response_model=schemas.CreditCardBase)
-def create_credit_card(card: schemas.CreditCardCreate, db: Session = Depends(get_db)):
-    try:
-        # Aynı kartın daha önce eklenip eklenmediğini kontrol et
-        existing_card = db.query(models.CreditCard).filter(
-            models.CreditCard.user_id == card.user_id,
-            models.CreditCard.last4 == card.last4,
-            models.CreditCard.expiry_month == card.expiry_month,
-            models.CreditCard.expiry_year == card.expiry_year
-        ).first()
-
-        if existing_card:
-            raise HTTPException(
-                status_code=400,
-                detail="Bu kart zaten eklenmiş. Aynı kartı birden fazla kez ekleyemezsiniz."
-            )
-
-        card_data = card.dict()
-        db_card = models.CreditCard(**card_data)
-        db.add(db_card)
-        db.commit()
-        db.refresh(db_card)
-
-        response_data = {
-            'id': db_card.id,
-            'user_id': db_card.user_id,
-            'provider': db_card.provider,
-            'card_token': db_card.card_token,
-            'card_brand': db_card.card_brand,
-            'last4': db_card.last4,
-            'expiry_month': db_card.expiry_month,
-            'expiry_year': db_card.expiry_year,
-            'is_default': db_card.is_default,
-            'created_at': db_card.created_at.isoformat() if db_card.created_at else None,
-            'updated_at': db_card.updated_at.isoformat() if db_card.updated_at else None,
-        }
-        return response_data
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error creating credit card: {str(e)}")
+def create_credit_card(card: schemas.CreditCardCreate, db: Session = Depends(get_db), actor=Depends(current_user)):
+    require_owner(card.user_id, actor)
+    db_card = db.query(models.CreditCard).filter_by(card_token=card.card_token).first()
+    if db_card is None:
+        raise HTTPException(400, "Tokenize this card before saving it")
+    require_owner(db_card.user_id, actor)
+    # Tokenization already saved authoritative metadata and its owner.
+    db_card.is_default = card.is_default
+    db.commit()
+    return card_response(db_card)
 
 @app.get("/credit_card", response_model=list[schemas.CreditCardBase])
-def get_credit_cards(db: Session = Depends(get_db)):
-    cards = db.query(models.CreditCard).all()
+def get_credit_cards(db: Session = Depends(get_db), actor=Depends(current_user)):
+    cards = db.query(models.CreditCard).filter_by(user_id=actor.id).all()
     response_cards = []
     for card in cards:
         response_cards.append({
@@ -1160,38 +1288,18 @@ def get_credit_cards(db: Session = Depends(get_db)):
     return response_cards
 
 @app.put("/credit_card/{card_id}", response_model=schemas.CreditCardBase)
-def update_credit_card(card_id: int, card: schemas.CreditCardUpdate, db: Session = Depends(get_db)):
-    try:
-        db_card = db.query(models.CreditCard).filter(models.CreditCard.id == card_id).first()
-        if not db_card:
-            raise HTTPException(status_code=404, detail="Credit card not found")
-
-        card_data = card.dict()
-        for key, value in card_data.items():
-            setattr(db_card, key, value)
-        db.commit()
-        db.refresh(db_card)
-
-        response_data = {
-            'id': db_card.id,
-            'user_id': db_card.user_id,
-            'provider': db_card.provider,
-            'card_token': db_card.card_token,
-            'card_brand': db_card.card_brand,
-            'last4': db_card.last4,
-            'expiry_month': db_card.expiry_month,
-            'expiry_year': db_card.expiry_year,
-            'is_default': db_card.is_default,
-            'created_at': db_card.created_at.isoformat() if db_card.created_at else None,
-            'updated_at': db_card.updated_at.isoformat() if db_card.updated_at else None,
-        }
-        return response_data
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error updating credit card: {str(e)}")
+def update_credit_card(card_id: int, card: schemas.CreditCardUpdate, db: Session = Depends(get_db), actor=Depends(current_user)):
+    db_card = owned_resource(db, models.CreditCard, card_id, actor)
+    for field in ("card_token", "provider", "card_brand", "last4", "expiry_month", "expiry_year"):
+        if getattr(card, field) != getattr(db_card, field):
+            raise HTTPException(403, "Saved payment credentials cannot be replaced; tokenize a new card")
+    db_card.is_default = card.is_default
+    db.commit()
+    return card_response(db_card)
 
 @app.delete("/credit_card/{card_id}")
-def delete_credit_card(card_id: int, db: Session = Depends(get_db)):
+def delete_credit_card(card_id: int, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.CreditCard, card_id, actor)
     db_card = db.query(models.CreditCard).filter(models.CreditCard.id == card_id).first()
     if not db_card:
         raise HTTPException(status_code=404, detail="Credit card not found")
@@ -1201,7 +1309,12 @@ def delete_credit_card(card_id: int, db: Session = Depends(get_db)):
 
 # --- ORDER CRUD ---
 @app.post("/order", response_model=schemas.OrderBase)
-def create_order(order_data: dict, db: Session = Depends(get_db)):
+def create_order(order_data: dict, db: Session = Depends(get_db), actor=Depends(current_user)):
+    if order_data.get('user_id') is not None:
+        require_owner(order_data['user_id'], actor)
+    owned_resource(db, models.Address, order_data.get('order_address'), actor)
+    if order_data.get('card_id') is not None:
+        owned_resource(db, models.CreditCard, order_data['card_id'], actor)
     try:
 
         # Parse dates from DD/MM/YYYY format to datetime objects
@@ -1226,7 +1339,7 @@ def create_order(order_data: dict, db: Session = Depends(get_db)):
             'order_estimated_delivery': parse_date(order_data.get('order_estimated_delivery')),
             'order_cargo_company': order_data.get('order_cargo_company'),
             'order_address': order_data.get('order_address'),
-            'order_status': order_data.get('order_status'),
+            'order_status': 'pending',
             'order_delivered_date': None
         }
         # Eğer sipariş delivered olarak oluşturuluyorsa bugünün tarihi ata
@@ -1256,10 +1369,10 @@ def create_order(order_data: dict, db: Session = Depends(get_db)):
 
 
         # Transaction başlat
-        db.begin()
+        # The authentication lookup already opened this transaction.
 
         # Önce siparişi oluştur
-        db_order = models.Order(**order_info)
+        db_order = models.Order(**order_info, user_id=actor.id)
         db.add(db_order)
         db.flush()  # ID'yi almak için flush yap ama commit etme
 
@@ -1313,14 +1426,17 @@ def create_order(order_data: dict, db: Session = Depends(get_db)):
             order_delivered_date=db_order.order_delivered_date.strftime('%Y-%m-%d') if db_order.order_delivered_date and hasattr(db_order.order_delivered_date, 'strftime') else None
         )
 
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         # Hata durumunda transaction'ı rollback et
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error creating order: {str(e)}")
 
 @app.get("/order", response_model=list[schemas.OrderBase])
-def get_orders(db: Session = Depends(get_db)):
-    orders = db.query(models.Order).all()
+def get_orders(db: Session = Depends(get_db), actor=Depends(current_user)):
+    orders = db.query(models.Order).filter_by(user_id=actor.id).all()
     result = []
     for order in orders:
 
@@ -1351,12 +1467,17 @@ def get_orders(db: Session = Depends(get_db)):
     return result
 
 @app.put("/order/{order_id}", response_model=schemas.OrderBase)
-def update_order(order_id: int, order: schemas.OrderUpdate, db: Session = Depends(get_db)):
+def update_order(order_id: int, order: schemas.OrderUpdate, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.Address, order.order_address, actor)
+    existing = db.get(models.Order, order_id)
+    if order.order_status != existing.order_status:
+        raise HTTPException(403, "Only the fulfilling seller may change order status")
+    owned_resource(db, models.Order, order_id, actor)
     db_order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not db_order:
         raise HTTPException(status_code=404, detail="Order not found")
     for key, value in order.dict().items():
-        setattr(db_order, key, value)
+        setattr(db_order, key, datetime.fromisoformat(value) if key in ("order_created_date", "order_estimated_delivery") else value)
     db.commit()
     db.refresh(db_order)
     return schemas.OrderBase(
@@ -1371,7 +1492,8 @@ def update_order(order_id: int, order: schemas.OrderUpdate, db: Session = Depend
     )
 
 @app.delete("/order/{order_id}")
-def delete_order(order_id: int, db: Session = Depends(get_db)):
+def delete_order(order_id: int, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.Order, order_id, actor)
     db_order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not db_order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -1381,7 +1503,9 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
 
 # --- USERS_ADDRESS CRUD ---
 @app.post("/users_address", response_model=schemas.UsersAddressBase)
-def create_users_address(ua: schemas.UsersAddressCreate, db: Session = Depends(get_db)):
+def create_users_address(ua: schemas.UsersAddressCreate, db: Session = Depends(get_db), actor=Depends(current_user)):
+    require_owner(ua.user_id, actor)
+    owned_resource(db, models.Address, ua.address_id, actor)
     try:
         db_ua = models.UsersAddress(**ua.dict())
         db.add(db_ua)
@@ -1393,11 +1517,14 @@ def create_users_address(ua: schemas.UsersAddressCreate, db: Session = Depends(g
         raise HTTPException(status_code=500, detail=f"Error creating users_address: {str(e)}")
 
 @app.get("/users_address", response_model=list[schemas.UsersAddressBase])
-def get_users_addresses(db: Session = Depends(get_db)):
-    return db.query(models.UsersAddress).all()
+def get_users_addresses(db: Session = Depends(get_db), actor=Depends(current_user)):
+    return db.query(models.UsersAddress).filter_by(user_id=actor.id).all()
 
 @app.put("/users_address/{ua_id}", response_model=schemas.UsersAddressBase)
-def update_users_address(ua_id: int, ua: schemas.UsersAddressUpdate, db: Session = Depends(get_db)):
+def update_users_address(ua_id: int, ua: schemas.UsersAddressUpdate, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.UsersAddress, ua_id, actor)
+    require_owner(ua.user_id, actor)
+    owned_resource(db, models.Address, ua.address_id, actor)
     db_ua = db.query(models.UsersAddress).filter(models.UsersAddress.id == ua_id).first()
     if not db_ua:
         raise HTTPException(status_code=404, detail="UsersAddress not found")
@@ -1408,7 +1535,8 @@ def update_users_address(ua_id: int, ua: schemas.UsersAddressUpdate, db: Session
     return db_ua
 
 @app.delete("/users_address/{ua_id}")
-def delete_users_address(ua_id: int, db: Session = Depends(get_db)):
+def delete_users_address(ua_id: int, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.UsersAddress, ua_id, actor)
     db_ua = db.query(models.UsersAddress).filter(models.UsersAddress.id == ua_id).first()
     if not db_ua:
         raise HTTPException(status_code=404, detail="UsersAddress not found")
@@ -1418,7 +1546,9 @@ def delete_users_address(ua_id: int, db: Session = Depends(get_db)):
 
 # --- USERS_CREDIT_CARD CRUD ---
 @app.post("/users_credit_card", response_model=schemas.UsersCreditCardBase)
-def create_users_credit_card(ucc: schemas.UsersCreditCardCreate, db: Session = Depends(get_db)):
+def create_users_credit_card(ucc: schemas.UsersCreditCardCreate, db: Session = Depends(get_db), actor=Depends(current_user)):
+    require_owner(ucc.user_id, actor)
+    owned_resource(db, models.CreditCard, ucc.credit_card_id, actor)
     db_ucc = models.UsersCreditCard(**ucc.dict())
     db.add(db_ucc)
     db.commit()
@@ -1426,11 +1556,14 @@ def create_users_credit_card(ucc: schemas.UsersCreditCardCreate, db: Session = D
     return db_ucc
 
 @app.get("/users_credit_card", response_model=list[schemas.UsersCreditCardBase])
-def get_users_credit_cards(db: Session = Depends(get_db)):
-    return db.query(models.UsersCreditCard).all()
+def get_users_credit_cards(db: Session = Depends(get_db), actor=Depends(current_user)):
+    return db.query(models.UsersCreditCard).filter_by(user_id=actor.id).all()
 
 @app.put("/users_credit_card/{ucc_id}", response_model=schemas.UsersCreditCardBase)
-def update_users_credit_card(ucc_id: int, ucc: schemas.UsersCreditCardUpdate, db: Session = Depends(get_db)):
+def update_users_credit_card(ucc_id: int, ucc: schemas.UsersCreditCardUpdate, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.UsersCreditCard, ucc_id, actor)
+    require_owner(ucc.user_id, actor)
+    owned_resource(db, models.CreditCard, ucc.credit_card_id, actor)
     db_ucc = db.query(models.UsersCreditCard).filter(models.UsersCreditCard.id == ucc_id).first()
     if not db_ucc:
         raise HTTPException(status_code=404, detail="UsersCreditCard not found")
@@ -1441,7 +1574,8 @@ def update_users_credit_card(ucc_id: int, ucc: schemas.UsersCreditCardUpdate, db
     return db_ucc
 
 @app.delete("/users_credit_card/{ucc_id}")
-def delete_users_credit_card(ucc_id: int, db: Session = Depends(get_db)):
+def delete_users_credit_card(ucc_id: int, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.UsersCreditCard, ucc_id, actor)
     db_ucc = db.query(models.UsersCreditCard).filter(models.UsersCreditCard.id == ucc_id).first()
     if not db_ucc:
         raise HTTPException(status_code=404, detail="UsersCreditCard not found")
@@ -1457,7 +1591,11 @@ def get_sms_balance():
 
 # --- USERS_ORDER CRUD ---
 @app.post("/users_order", response_model=schemas.UsersOrderBase)
-def create_users_order(uo: schemas.UsersOrderCreate, db: Session = Depends(get_db)):
+def create_users_order(uo: schemas.UsersOrderCreate, db: Session = Depends(get_db), actor=Depends(current_user)):
+    require_owner(uo.user_id, actor)
+    owned_resource(db, models.Order, uo.order_id, actor)
+    if db.get(models.Product, uo.product_id) is None:
+        raise HTTPException(404, "Product not found")
     try:
 
         db_uo = models.UsersOrder(**uo.dict())
@@ -1472,11 +1610,16 @@ def create_users_order(uo: schemas.UsersOrderCreate, db: Session = Depends(get_d
         raise HTTPException(status_code=500, detail=f"Failed to create users_order: {str(e)}")
 
 @app.get("/users_order", response_model=list[schemas.UsersOrderBase])
-def get_users_orders(db: Session = Depends(get_db)):
-    return db.query(models.UsersOrder).all()
+def get_users_orders(db: Session = Depends(get_db), actor=Depends(current_user)):
+    return db.query(models.UsersOrder).filter_by(user_id=actor.id).all()
 
 @app.put("/users_order/{uo_id}", response_model=schemas.UsersOrderBase)
-def update_users_order(uo_id: int, uo: schemas.UsersOrderUpdate, db: Session = Depends(get_db)):
+def update_users_order(uo_id: int, uo: schemas.UsersOrderUpdate, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.UsersOrder, uo_id, actor)
+    require_owner(uo.user_id, actor)
+    owned_resource(db, models.Order, uo.order_id, actor)
+    if db.get(models.Product, uo.product_id) is None:
+        raise HTTPException(404, "Product not found")
     db_uo = db.query(models.UsersOrder).filter(models.UsersOrder.id == uo_id).first()
     if not db_uo:
         raise HTTPException(status_code=404, detail="UsersOrder not found")
@@ -1487,7 +1630,8 @@ def update_users_order(uo_id: int, uo: schemas.UsersOrderUpdate, db: Session = D
     return db_uo
 
 @app.delete("/users_order/{uo_id}")
-def delete_users_order(uo_id: int, db: Session = Depends(get_db)):
+def delete_users_order(uo_id: int, db: Session = Depends(get_db), actor=Depends(current_user)):
+    owned_resource(db, models.UsersOrder, uo_id, actor)
     db_uo = db.query(models.UsersOrder).filter(models.UsersOrder.id == uo_id).first()
     if not db_uo:
         raise HTTPException(status_code=404, detail="UsersOrder not found")
@@ -1496,7 +1640,7 @@ def delete_users_order(uo_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 @app.post('/upload-image')
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(file: UploadFile = File(...), actor=Depends(current_seller)):
     upload_dir = 'uploads/Product_Image'
     os.makedirs(upload_dir, exist_ok=True)
     ext = file.filename.split('.')[-1]
@@ -1524,19 +1668,6 @@ def check_database(db: Session = Depends(get_db)):
 @app.get("/")
 def root():
     return {"message": "Backend is running!"}
-
-@app.get("/debug/endpoints")
-def list_endpoints():
-    """Mevcut endpoint'leri listele"""
-    routes = []
-    for route in app.routes:
-        if hasattr(route, 'path'):
-            routes.append({
-                "path": route.path,
-                "methods": [method for method in route.methods] if hasattr(route, 'methods') else [],
-                "name": route.name if hasattr(route, 'name') else "Unknown"
-            })
-    return {"endpoints": routes}
 
 # --- SELLER CRUD ---
 @app.post("/sellers/signup", response_model=schemas.SellerBase)
@@ -1634,7 +1765,7 @@ async def create_seller(
         # Sadece gerçek sunucu hatalarında 500 döndür
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.post("/sellers/login", response_model=schemas.SellerBase)
+@app.post("/sellers/login", response_model=schemas.SellerLoginResponse)
 def login_seller(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     try:
         seller = db.query(models.Seller).filter(models.Seller.email == email).first()
@@ -1642,7 +1773,8 @@ def login_seller(email: str = Form(...), password: str = Form(...), db: Session 
         if not seller or not verify_password(password, seller.password):
             raise HTTPException(status_code=401, detail="E-posta veya şifre hatalı!")
 
-        return schemas.SellerBase(
+        return schemas.SellerLoginResponse(
+            access_token=issue_access_token(seller, "seller"),
             id=seller.id,
             name=seller.name,
             email=seller.email,
@@ -1665,7 +1797,10 @@ def login_seller(email: str = Form(...), password: str = Form(...), db: Session 
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/sellers/profile", response_model=schemas.SellerBase)
-def get_seller_profile(seller_id: int, db: Session = Depends(get_db)):
+def get_seller_profile(seller_id: int | None = None, db: Session = Depends(get_db), actor=Depends(current_seller)):
+    if seller_id is not None:
+        require_owner(seller_id, actor)
+    seller_id = actor.id
     seller = db.query(models.Seller).filter(models.Seller.id == seller_id).first()
     if not seller:
         raise HTTPException(status_code=404, detail="Seller not found")
@@ -1733,7 +1868,7 @@ def get_seller_products(seller_id: int, db: Session = Depends(get_db)):
 
 @app.put("/sellers/profile", response_model=schemas.SellerBase)
 async def update_seller_profile(
-    seller_id: int,
+    seller_id: int | None = None,
     name: str = Form(None),
     email: str = Form(None),
     phone: str = Form(None),
@@ -1741,8 +1876,11 @@ async def update_seller_profile(
     store_description: str = Form(None),
     cargo_company: str = Form(None),
     logo: UploadFile = File(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), actor=Depends(current_seller)
 ):
+    if seller_id is not None:
+        require_owner(seller_id, actor)
+    seller_id = actor.id
     seller = db.query(models.Seller).filter(models.Seller.id == seller_id).first()
     if not seller:
         raise HTTPException(status_code=404, detail="Seller not found")
@@ -1880,8 +2018,9 @@ async def update_seller_profile(
 
 # --- SELLER ORDERS (NEW - using users_order table) ---
 @app.get("/seller_orders/{seller_id}", response_model=list[dict])
-def get_seller_orders(seller_id: int, db: Session = Depends(get_db)):
+def get_seller_orders(seller_id: int, db: Session = Depends(get_db), actor=Depends(current_seller)):
     """Satıcıya ait siparişleri getir - users_order tablosunu kullanarak"""
+    owned_resource(db, models.Seller, seller_id, actor, "id")
     try:
         # Bu satıcıya ait ürünlerin ID'lerini al
         seller_products = db.query(models.Product).filter(
@@ -1981,8 +2120,19 @@ def get_seller_orders(seller_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error getting seller orders: {str(e)}")
 
 @app.put("/seller_orders/{order_id}/status")
-def update_seller_order_status(order_id: int, status: str, db: Session = Depends(get_db)):
+def update_seller_order_status(order_id: int, status: str, db: Session = Depends(get_db), actor=Depends(current_seller)):
     """Satıcı sipariş durumunu güncelle - UPDATED"""
+    order = db.get(models.Order, order_id)
+    if order is None:
+        raise HTTPException(404, "Order not found")
+    owners = {row[0] for row in db.query(models.Product.seller_id).join(
+        models.UsersOrder, models.UsersOrder.product_id == models.Product.id
+    ).filter(models.UsersOrder.order_id == order_id).all()}
+    # Status is stored on the whole order. Mixed-seller legacy orders cannot safely be changed here.
+    if owners != {actor.id}:
+        raise HTTPException(403, "Order is not exclusively fulfilled by this seller")
+    if status not in {"pending", "processing", "shipped", "delivered", "cancelled"}:
+        raise HTTPException(422, "Invalid order status")
     try:
 
         if not status:
@@ -2013,8 +2163,9 @@ def update_seller_order_status(order_id: int, status: str, db: Session = Depends
         raise HTTPException(status_code=500, detail=f"Error updating order status: {str(e)}")
 
 @app.get("/seller_statistics/{seller_id}")
-def get_seller_statistics(seller_id: int, db: Session = Depends(get_db)):
+def get_seller_statistics(seller_id: int, db: Session = Depends(get_db), actor=Depends(current_seller)):
     """Satıcı istatistiklerini getir"""
+    owned_resource(db, models.Seller, seller_id, actor, "id")
     try:
         # Satıcının ürünlerini al
         seller_products = db.query(models.Product).filter(models.Product.seller_id == seller_id).all()
@@ -2094,8 +2245,9 @@ def get_seller_statistics(seller_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error getting seller statistics: {str(e)}")
 
 @app.get("/seller_active_orders/{seller_id}", response_model=list[dict])
-def get_seller_active_orders(seller_id: int, db: Session = Depends(get_db)):
+def get_seller_active_orders(seller_id: int, db: Session = Depends(get_db), actor=Depends(current_seller)):
     """Satıcının aktif siparişlerini getir (pending, processing, shipped)"""
+    owned_resource(db, models.Seller, seller_id, actor, "id")
     try:
         # Satıcının ürünlerini al
         seller_products = db.query(models.Product).filter(models.Product.seller_id == seller_id).all()
@@ -2169,8 +2321,14 @@ def get_seller_active_orders(seller_id: int, db: Session = Depends(get_db)):
 
 # --- SELLER REVIEWS ---
 @app.post("/seller_reviews", response_model=schemas.SellerReviewBase)
-def create_seller_review(review: schemas.SellerReviewCreate, db: Session = Depends(get_db)):
+def create_seller_review(review: schemas.SellerReviewCreate, db: Session = Depends(get_db), actor=Depends(current_user)):
     """Ürün değerlendirmesi oluştur"""
+    require_owner(review.user_id, actor)
+    product = db.get(models.Product, review.product_id)
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    if product.seller_id != review.seller_id:
+        raise HTTPException(403, "Product belongs to another seller")
     try:
 
         # Rating kontrolü (1-5 arası)
@@ -2250,8 +2408,9 @@ def get_seller_reviews(
         raise HTTPException(status_code=500, detail=f"Error getting seller reviews: {str(e)}")
 
 @app.put("/seller_reviews/{review_id}", response_model=schemas.SellerReviewBase)
-def update_seller_review(review_id: int, review: schemas.SellerReviewUpdate, db: Session = Depends(get_db)):
+def update_seller_review(review_id: int, review: schemas.SellerReviewUpdate, db: Session = Depends(get_db), actor=Depends(current_user)):
     """Değerlendirme güncelle"""
+    owned_resource(db, models.SellerReview, review_id, actor)
     try:
         db_review = db.query(models.SellerReview).filter(models.SellerReview.id == review_id).first()
         if not db_review:
@@ -2284,8 +2443,9 @@ def update_seller_review(review_id: int, review: schemas.SellerReviewUpdate, db:
         raise HTTPException(status_code=500, detail=f"Error updating seller review: {str(e)}")
 
 @app.delete("/seller_reviews/{review_id}")
-def delete_seller_review(review_id: int, db: Session = Depends(get_db)):
+def delete_seller_review(review_id: int, db: Session = Depends(get_db), actor=Depends(current_user)):
     """Değerlendirme sil"""
+    owned_resource(db, models.SellerReview, review_id, actor)
     try:
         db_review = db.query(models.SellerReview).filter(models.SellerReview.id == review_id).first()
         if not db_review:
@@ -2389,8 +2549,9 @@ def send_seller_verification_code(verification: schemas.PhoneVerificationSellerC
         raise HTTPException(status_code=500, detail=f"Response oluşturulamadı: {str(e)}")
 
 @app.post("/verify-seller-phone", response_model=schemas.PhoneVerificationResponse)
-def verify_seller_phone(verification: schemas.PhoneVerificationSellerVerify, db: Session = Depends(get_db)):
+def verify_seller_phone(verification: schemas.PhoneVerificationSellerVerify, db: Session = Depends(get_db), actor=Depends(optional_actor)):
     """Satıcılar için telefon numarası doğrulama kodunu doğrula"""
+    account = phone_verification_owner(db, verification.phone_number, "seller", actor)
 
     # Doğrulama kaydını bul
     db_verification = db.query(models.PhoneVerificationSeller).filter(
@@ -2430,6 +2591,8 @@ def verify_seller_phone(verification: schemas.PhoneVerificationSellerVerify, db:
 
     # Doğrulama başarılı
     db_verification.is_verified = "verified"
+    if account is not None:
+        account.phone_verified = "verified"
     db.commit()
 
     return schemas.PhoneVerificationResponse(
@@ -2439,8 +2602,10 @@ def verify_seller_phone(verification: schemas.PhoneVerificationSellerVerify, db:
 
 # --- EMAIL VERIFICATION FOR USERS ---
 @app.post("/send-email-verification-code", response_model=schemas.EmailVerificationResponse)
-def send_email_verification_code(verification: schemas.EmailVerificationCreate, db: Session = Depends(get_db)):
+def send_email_verification_code(verification: schemas.EmailVerificationCreate, db: Session = Depends(get_db), actor=Depends(current_user)):
     """Kullanıcılar için email adresine doğrulama kodu gönder"""
+    if verification.email != actor.email:
+        raise HTTPException(403, "Email belongs to another account")
 
     # Email formatını doğrula
     import re
@@ -2521,8 +2686,10 @@ def send_email_verification_code(verification: schemas.EmailVerificationCreate, 
         raise HTTPException(status_code=500, detail=f"Response oluşturulamadı: {str(e)}")
 
 @app.post("/verify-email", response_model=schemas.EmailVerificationResponse)
-def verify_email(verification: schemas.EmailVerificationVerify, db: Session = Depends(get_db)):
+def verify_email(verification: schemas.EmailVerificationVerify, db: Session = Depends(get_db), actor=Depends(current_user)):
     """Kullanıcılar için email doğrulama kodunu doğrula"""
+    if verification.email != actor.email:
+        raise HTTPException(403, "Email belongs to another account")
 
     # Doğrulama kaydını bul
     db_verification = db.query(models.EmailVerification).filter(
@@ -2578,8 +2745,10 @@ def verify_email(verification: schemas.EmailVerificationVerify, db: Session = De
 
 # --- EMAIL VERIFICATION FOR SELLERS ---
 @app.post("/send-seller-email-verification-code", response_model=schemas.EmailVerificationSellerResponse)
-def send_seller_email_verification_code(verification: schemas.EmailVerificationSellerCreate, db: Session = Depends(get_db)):
+def send_seller_email_verification_code(verification: schemas.EmailVerificationSellerCreate, db: Session = Depends(get_db), actor=Depends(current_seller)):
     """Satıcılar için email adresine doğrulama kodu gönder"""
+    if verification.email != actor.email:
+        raise HTTPException(403, "Email belongs to another account")
 
     # Email formatını doğrula
     import re
@@ -2660,8 +2829,10 @@ def send_seller_email_verification_code(verification: schemas.EmailVerificationS
         raise HTTPException(status_code=500, detail=f"Response oluşturulamadı: {str(e)}")
 
 @app.post("/verify-seller-email", response_model=schemas.EmailVerificationSellerResponse)
-def verify_seller_email(verification: schemas.EmailVerificationSellerVerify, db: Session = Depends(get_db)):
+def verify_seller_email(verification: schemas.EmailVerificationSellerVerify, db: Session = Depends(get_db), actor=Depends(current_seller)):
     """Satıcı email doğrulama kodunu doğrula"""
+    if verification.email != actor.email:
+        raise HTTPException(403, "Email belongs to another account")
 
     # Doğrulama kaydını bul
     db_verification = db.query(models.EmailVerificationSeller).filter(
@@ -2714,7 +2885,7 @@ def verify_seller_email(verification: schemas.EmailVerificationSellerVerify, db:
         success=True
     )
 
-@app.post("/users/login", response_model=schemas.UserBase)
+@app.post("/users/login", response_model=schemas.UserLoginResponse)
 def login_user(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     try:
         user = db.query(models.User).filter(models.User.email == email).first()
@@ -2722,7 +2893,8 @@ def login_user(email: str = Form(...), password: str = Form(...), db: Session = 
         if not user or not verify_password(password, user.password):
             raise HTTPException(status_code=401, detail="E-posta veya şifre hatalı!")
 
-        return schemas.UserBase(
+        return schemas.UserLoginResponse(
+            access_token=issue_access_token(user, "user"),
             id=user.id,
             name_surname=user.name_surname,
             email=user.email,
@@ -2742,8 +2914,9 @@ def login_user(email: str = Form(...), password: str = Form(...), db: Session = 
 # ===== SATICI TAKİP SİSTEMİ =====
 
 @app.post("/users/{user_id}/follow-seller/{seller_id}")
-def follow_seller(user_id: int, seller_id: int, db: Session = Depends(get_db)):
+def follow_seller(user_id: int, seller_id: int, db: Session = Depends(get_db), actor=Depends(current_user)):
     """Kullanıcı satıcıyı takip etsin"""
+    owned_resource(db, models.User, user_id, actor, "id")
     try:
         # Kullanıcı ve satıcı var mı kontrol et
         user = db.query(models.User).filter(models.User.id == user_id).first()
@@ -2771,10 +2944,9 @@ def follow_seller(user_id: int, seller_id: int, db: Session = Depends(get_db)):
         db.add(new_follow)
 
         # Satıcının takipçi sayısını SQL ile güncelle
-        db.execute(
-            text("UPDATE sellers SET followers_count = COALESCE(followers_count, 0) + 1 WHERE id = :seller_id"),
-            {"seller_id": seller_id}
-        )
+        db.query(models.Seller).filter_by(id=seller_id).update({
+            "followers_count": func.coalesce(models.Seller.followers_count, 0) + 1,
+        })
 
         db.commit()
 
@@ -2786,8 +2958,9 @@ def follow_seller(user_id: int, seller_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Takip işlemi başarısız")
 
 @app.delete("/users/{user_id}/unfollow-seller/{seller_id}")
-def unfollow_seller(user_id: int, seller_id: int, db: Session = Depends(get_db)):
+def unfollow_seller(user_id: int, seller_id: int, db: Session = Depends(get_db), actor=Depends(current_user)):
     """Kullanıcı satıcıyı takipten çıkarsın"""
+    owned_resource(db, models.User, user_id, actor, "id")
     try:
         # Takip kaydını bul ve sil
         follow_record = db.query(models.UsersSellers).filter(
@@ -2799,10 +2972,11 @@ def unfollow_seller(user_id: int, seller_id: int, db: Session = Depends(get_db))
             raise HTTPException(status_code=404, detail="Takip kaydı bulunamadı")
 
         # Satıcının takipçi sayısını SQL ile güncelle
-        db.execute(
-            text("UPDATE sellers SET followers_count = GREATEST(COALESCE(followers_count, 0) - 1, 0) WHERE id = :seller_id"),
-            {"seller_id": seller_id}
-        )
+        db.query(models.Seller).filter_by(id=seller_id).update({
+            "followers_count": case(
+                (models.Seller.followers_count > 0, models.Seller.followers_count - 1), else_=0,
+            ),
+        })
 
         db.delete(follow_record)
         db.commit()
@@ -2883,7 +3057,24 @@ def check_if_following(user_id: int, seller_id: int, db: Session = Depends(get_d
     except Exception as e:
         return {"is_following": False}
 
+@app.post("/sellers/{seller_id}/send-phone-verification", response_model=schemas.PhoneVerificationResponse)
+def send_seller_phone_verification(seller_id: int, db: Session = Depends(get_db), actor=Depends(current_seller)):
+    owned_resource(db, models.Seller, seller_id, actor, "id")
+    if not validate_phone_number(actor.phone):
+        raise HTTPException(422, "Invalid phone number")
+    code = generate_verification_code()
+    db.query(models.PhoneVerificationSeller).filter_by(phone_number=actor.phone).delete()
+    db.add(models.PhoneVerificationSeller(
+        phone_number=actor.phone, verification_code=code, is_verified="pending", attempts=0,
+        created_at=datetime.now(), expires_at=datetime.now() + timedelta(minutes=5),
+    ))
+    if not send_sms_verification(actor.phone, code, "tr"):
+        db.rollback()
+        raise HTTPException(503, "Verification message could not be sent")
+    db.commit()
+    return schemas.PhoneVerificationResponse(message="Verification code sent", success=True, expires_in=300)
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)
-

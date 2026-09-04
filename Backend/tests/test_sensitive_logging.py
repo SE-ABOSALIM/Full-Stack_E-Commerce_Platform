@@ -89,7 +89,7 @@ def assert_safe_output(capsys, *extra):
     return text
 
 
-def test_registration_login_and_password_update_logs(client, backend, db, capsys):
+def test_registration_login_and_password_update_logs(client, backend, db, capsys, auth_headers):
     db.add(backend.models.PhoneVerification(
         phone_number=PHONE, verification_code=CODE, is_verified="verified",
         attempts=0, created_at=datetime.now(), expires_at=datetime.now() + timedelta(minutes=5),
@@ -104,7 +104,7 @@ def test_registration_login_and_password_update_logs(client, backend, db, capsys
     for password, status in [(PASSWORD, 200), ("incorrect-password", 401)]:
         assert client.post("/users/login", data={"email": EMAIL, "password": password}).status_code == status
     new_password = "Replacement-password-789!"
-    assert client.put(f"/users/{user.id}", json={**payload, "password": new_password}).status_code == 200
+    assert client.put("/users/me/password", headers=auth_headers(user, PASSWORD), json={"current_password": PASSWORD, "new_password": new_password, "new_password_again": new_password}).status_code == 200
     db.refresh(user)
     assert backend.verify_password(new_password, user.password)
     assert_safe_output(capsys, original_hash, user.password, new_password, "Private Buyer")
@@ -131,7 +131,7 @@ def test_phone_verification_logs_and_requests(client, backend, db, monkeypatch, 
 
 
 @pytest.mark.parametrize("seller", [False, True])
-def test_email_verification_logs_and_requests(client, backend, db, monkeypatch, capsys, seller):
+def test_email_verification_logs_and_requests(client, backend, db, monkeypatch, capsys, seller, auth_headers):
     monkeypatch.setattr(backend, "generate_verification_code", lambda: CODE)
     if seller:
         record = backend.models.Seller(name="Private Seller", email=EMAIL, phone=PHONE,
@@ -144,10 +144,11 @@ def test_email_verification_logs_and_requests(client, backend, db, monkeypatch, 
     backend.email_service.send_verification_email.return_value = {"success": True, "message": "Sent"}
     send_path = "/send-seller-email-verification-code" if seller else "/send-email-verification-code"
     verify_path = "/verify-seller-email" if seller else "/verify-email"
-    response = client.post(send_path, json={"email": EMAIL, "language": "tr"})
+    headers = auth_headers(record, PASSWORD, "seller" if seller else "user")
+    response = client.post(send_path, headers=headers, json={"email": EMAIL, "language": "tr"})
     assert response.status_code == 200, response.text
     backend.email_service.send_verification_email.assert_called_with(EMAIL, CODE, "tr")
-    response = client.post(verify_path, json={"email": EMAIL, "verification_code": CODE})
+    response = client.post(verify_path, headers=headers, json={"email": EMAIL, "verification_code": CODE})
     assert response.status_code == 200
     db.refresh(record)
     assert record.email_verified == "verified"

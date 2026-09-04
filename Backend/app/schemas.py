@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 
 # Product
@@ -47,10 +47,32 @@ class UserCreate(BaseModel):
     phone_number: str
 
 class UserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name_surname: str
-    password: Optional[str] = None
     email: str
     phone_number: str
+
+
+class UserLoginResponse(UserBase):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class PasswordChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=8, max_length=1024)
+    new_password_again: str = Field(min_length=8, max_length=1024)
+
+
+class PasswordResetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    phone_number: str = Field(min_length=8, max_length=30)
+
+
+class PasswordReset(PasswordResetRequest):
+    verification_code: str = Field(pattern=r"^[0-9]{6}$")
+    new_password: str = Field(min_length=8, max_length=1024)
 
 # Address
 class AddressBase(BaseModel):
@@ -242,6 +264,11 @@ class SellerCreate(BaseModel):
     store_name: str
     store_description: Optional[str] = None
     cargo_company: Optional[str] = "Araskargo"
+
+
+class SellerLoginResponse(SellerBase):
+    access_token: str
+    token_type: str = "bearer"
 
 class SellerUpdate(BaseModel):
     name: Optional[str] = None

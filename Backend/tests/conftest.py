@@ -16,6 +16,7 @@ def backend(tmp_path_factory):
     with pytest.MonkeyPatch.context() as patch:
         patch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
         patch.setenv("DATABASE_URL", f"sqlite:///{directory / 'test.db'}")
+        patch.setenv("AUTH_SECRET_KEY", "test-only-authentication-secret-32-bytes-minimum")
         patch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
         patch.setattr("twilio.rest.Client", Mock())
         patch.setattr(
@@ -49,3 +50,12 @@ def db(backend):
 def client(backend, db):
     with TestClient(backend.app, raise_server_exceptions=False) as client:
         yield client
+
+
+@pytest.fixture
+def auth_headers(client):
+    def login(actor, password="Original-password-123!", role="user"):
+        response = client.post(f"/{role}s/login", data={"email": actor.email, "password": password})
+        assert response.status_code == 200, response.text
+        return {"Authorization": "Bearer " + response.json()["access_token"]}
+    return login
