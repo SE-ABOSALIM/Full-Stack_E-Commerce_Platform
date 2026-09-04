@@ -39,9 +39,6 @@ class TwilioSMS:
                 language = sms_language_manager.get_language_from_phone(phone_number)
             
             print(f"📱 SMS gönderiliyor:")
-            print(f"   📞 To: {phone_number}")
-            print(f"   📞 From: {self.from_number}")
-            print(f"   📝 Message: {message}")
             print(f"   🌍 Language: {language}")
             
             # Telefon numarası ile SMS gönder
@@ -68,7 +65,7 @@ class TwilioSMS:
             }
             
         except Exception as e:
-            print(f"❌ SMS gönderilirken hata: {e}")
+            print(f"❌ SMS gönderilirken hata: {type(e).__name__}")
             return {
                 'success': False,
                 'message': f'SMS gönderilirken hata oluştu: {str(e)}',

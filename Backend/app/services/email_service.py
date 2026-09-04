@@ -38,9 +38,6 @@ class EmailService:
             if (self.sender_email == 'your-email@gmail.com' or 
                 self.sender_password == 'your-app-password'):
                 print(f"⚠️ Email ayarları yapılandırılmamış. Test modunda çalışıyor...")
-                print(f"📧 Email: {email}")
-                print(f"🔢 Kod: {code}")
-                print(f"📝 Konu: {subject}")
                 
                 return {
                     'success': True,
@@ -137,7 +134,7 @@ class EmailService:
             server.sendmail(self.sender_email, email, text)
             server.quit()
             
-            print(f"✅ Email başarıyla gönderildi: {email}")
+            print("Email başarıyla gönderildi")
             
             return {
                 'success': True,
@@ -148,7 +145,7 @@ class EmailService:
             }
             
         except Exception as e:
-            print(f"❌ Email gönderilirken hata: {e}")
+            print(f"❌ Email gönderilirken hata: {type(e).__name__}")
             return {
                 'success': False,
                 'message': f'Email gönderilirken hata oluştu: {str(e)}',
