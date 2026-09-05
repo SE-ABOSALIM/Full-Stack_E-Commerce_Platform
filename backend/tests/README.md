@@ -3,7 +3,7 @@
 From the repository root, run:
 
 ```sh
-python -m pytest Backend/tests -q
+python -m pytest backend/tests -q
 flutter test --no-pub
 ```
 
@@ -23,4 +23,3 @@ Authorization tests log in through the real endpoints with an isolated test sign
 key. They cover role separation, resource ownership, password changes and one-time
 OTP consumption, including simultaneous reset requests. Flutter tests cover bearer
 selection, persisted session validation, multipart profile updates and the OTP form.
-See [AUTHORIZATION.md](../AUTHORIZATION.md) for contracts and development DB migration.

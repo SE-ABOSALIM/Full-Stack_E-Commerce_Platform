@@ -73,9 +73,11 @@ Developed over several months, the project explores a range of interconnected e-
 - Multilingual UI support (TR / EN / AR)
 
 ### Backend
-- **FastAPI** REST API
+- **FastAPI** REST API organized into domain-specific routers
 - Pydantic-based request and response validation
-- Email and password-based authentication
+- HMAC-signed bearer authentication with separate user and seller identities
+- Server-side authorization and resource ownership checks
+- Shared database/authentication dependencies and account, verification, and file services
 - Salted PBKDF2 password hashing
 - Buyer and seller application workflows
 
@@ -94,6 +96,9 @@ Developed over several months, the project explores a range of interconnected e-
 
 ## Authentication & Validation
 
+- HMAC-SHA256-signed bearer credentials
+- Separate user and seller identities with role-specific route dependencies
+- Server-side ownership checks for protected account and resource operations
 - Salted PBKDF2 password hashing
 - Email and phone verification flows
 - Server-side request validation with Pydantic
@@ -147,13 +152,22 @@ Relevant errors are surfaced to the client to provide feedback during applicatio
 
 ---
 
+## Automated Testing
+
+The backend currently has 92 automated tests covering authentication and role separation, resource ownership, password and verification flows, phone-number normalization, sensitive logging, and the FastAPI route contract.
+
+Run the backend suite from the repository root:
+
+```sh
+python -m pytest backend/tests -q
+```
+
+---
+
 ## Future Improvements
 
 Potential future improvements include:
 
-- Stronger backend authorization and ownership enforcement
-- Modularization of the backend into smaller services and routers
-- Automated test coverage
 - Further hardening of payment and checkout workflows
 - Advanced analytics and reporting
 - Notification services
@@ -163,4 +177,4 @@ Potential future improvements include:
 ---
 
 ## Project Scope
-This is a portfolio and learning project developed to model a multi-role e-commerce application and explore full-stack mobile development. The project focuses on implementing interconnected buyer, seller, backend, database, verification, and payment workflows, while leaving room for further architectural, security, testing, and deployment improvements.
+This is a portfolio and learning project developed to model a multi-role e-commerce application and explore full-stack mobile development. The project focuses on interconnected buyer, seller, backend, database, verification, and payment workflows while leaving room for further payment, performance, and deployment improvements.
