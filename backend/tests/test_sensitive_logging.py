@@ -47,7 +47,7 @@ def unsafe_expression(expression):
 
 def test_backend_log_arguments_exclude_sensitive_values():
     violations = []
-    for path in (ROOT / "Backend/app").rglob("*.py"):
+    for path in (ROOT / "backend/app").rglob("*.py"):
         for call in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if not isinstance(call, ast.Call):
                 continue

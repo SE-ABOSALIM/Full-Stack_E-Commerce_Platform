@@ -4,9 +4,6 @@ from collections import Counter
 
 from fastapi.routing import APIRoute
 
-from app import schemas
-
-
 EXPECTED_ROUTES = {
     tuple(line.split(" ", 1))
     for line in """
@@ -127,6 +124,8 @@ def test_route_inventory_and_router_grouping_are_stable(backend):
 
 
 def test_openapi_methods_response_models_and_auth_dependencies_are_stable(backend):
+    from app import schemas
+
     document = backend.app.openapi()
     documented = {
         (method.upper(), path)
