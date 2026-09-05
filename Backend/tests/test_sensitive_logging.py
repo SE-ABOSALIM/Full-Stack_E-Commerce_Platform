@@ -113,7 +113,7 @@ def test_registration_login_and_password_update_logs(client, backend, db, capsys
 
 @pytest.mark.parametrize("seller", [False, True])
 def test_phone_verification_logs_and_requests(client, backend, db, monkeypatch, capsys, seller):
-    monkeypatch.setattr(backend, "generate_verification_code", lambda: CODE)
+    monkeypatch.setattr(backend.verification_routes, "generate_verification_code", lambda: CODE)
     backend.twilio_sms_service.send_verification_sms.return_value = {
         "success": True, "message": SECRET_ERROR, "brand_name": "Test", "language": "tr",
     }
@@ -133,7 +133,7 @@ def test_phone_verification_logs_and_requests(client, backend, db, monkeypatch, 
 
 @pytest.mark.parametrize("seller", [False, True])
 def test_email_verification_logs_and_requests(client, backend, db, monkeypatch, capsys, seller, auth_headers):
-    monkeypatch.setattr(backend, "generate_verification_code", lambda: CODE)
+    monkeypatch.setattr(backend.verification_routes, "generate_verification_code", lambda: CODE)
     if seller:
         record = backend.models.Seller(name="Private Seller", email=EMAIL, phone=PHONE,
                                        password=backend.hash_password(PASSWORD), store_name="Test Store")

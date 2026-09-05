@@ -61,3 +61,47 @@ def read_access_token(token):
         return claims
     except (ValueError, KeyError, TypeError, UnicodeError):
         raise HTTPException(401, "Invalid or expired credentials", headers={"WWW-Authenticate": "Bearer"}) from None
+
+
+PBKDF2_ITERATIONS = 100_000
+SALT_BYTES = 16
+
+
+def hash_password(plain_password: str) -> str:
+    """Return a salted PBKDF2 hash for the given password."""
+    salt = os.urandom(SALT_BYTES)
+    pwd_hash = hashlib.pbkdf2_hmac(
+        "sha256",
+        plain_password.encode("utf-8"),
+        salt,
+        PBKDF2_ITERATIONS,
+    )
+    # Store as base64(salt):base64(hash) to keep column as string
+    return f"{base64.b64encode(salt).decode('utf-8')}:{base64.b64encode(pwd_hash).decode('utf-8')}"
+
+
+def verify_password(plain_password: str, stored_password: str) -> bool:
+    """
+    Check a plaintext password against a stored salted hash.
+    Supports legacy plaintext records for backward compatibility.
+    """
+    if not stored_password:
+        return False
+
+    # Legacy plaintext support
+    if ":" not in stored_password:
+        return hmac.compare_digest(plain_password, stored_password)
+
+    try:
+        salt_b64, hash_b64 = stored_password.split(":", 1)
+        salt = base64.b64decode(salt_b64.encode("utf-8"))
+        stored_hash = base64.b64decode(hash_b64.encode("utf-8"))
+        new_hash = hashlib.pbkdf2_hmac(
+            "sha256",
+            plain_password.encode("utf-8"),
+            salt,
+            PBKDF2_ITERATIONS,
+        )
+        return hmac.compare_digest(new_hash, stored_hash)
+    except Exception:
+        return False

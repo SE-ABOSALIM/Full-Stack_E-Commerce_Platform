@@ -101,7 +101,7 @@ def test_invalid_expired_tampered_and_wrong_role_tokens(client, actors, auth_hea
 def reset_setup(client, backend, db, actors, monkeypatch):
     user = actors[0][0]
     sms = Mock(return_value=True)
-    monkeypatch.setattr(backend, "send_sms_verification", sms)
+    monkeypatch.setattr(backend.verification_routes, "send_sms_verification", sms)
     def request():
         response = client.post("/auth/forgot-password/request", json={"phone_number": user.phone_number})
         assert response.status_code == 200, response.text
@@ -362,8 +362,8 @@ def test_account_verification_requires_owner(client, backend, db, actors, auth_h
         assert client.post(path, json=body, headers=headers).status_code == 403
     assert client.post(f"/{role}s/{b.id}/send-phone-verification", headers=headers).status_code == 403
     assert client.post(f"/{role}s/{a.id}/send-phone-verification").status_code == 401
-    monkeypatch.setattr(backend, "generate_verification_code", lambda: "123456")
-    monkeypatch.setattr(backend, "send_sms_verification", Mock(return_value=True))
+    monkeypatch.setattr(backend.verification_routes, "generate_verification_code", lambda: "123456")
+    monkeypatch.setattr(backend.verification_routes, "send_sms_verification", Mock(return_value=True))
     assert client.post(f"/{role}s/{a.id}/send-phone-verification", headers=headers).status_code == 200
     phone = a.phone_number if role == "user" else a.phone
     path = "/verify-phone" if role == "user" else "/verify-seller-phone"
@@ -454,7 +454,7 @@ def test_own_product_cannot_delete_another_products_image(client, backend, db, a
     db.add_all([other, own])
     db.commit()
     delete_file = Mock()
-    monkeypatch.setattr(backend, "delete_file_safely", delete_file)
+    monkeypatch.setattr(backend.file_service, "delete_file_safely", delete_file)
     headers = auth_headers(a, role="seller")
     assert client.put(f"/products/{own.id}", headers=headers, json=PRODUCT).status_code == 200
     delete_file.assert_not_called()

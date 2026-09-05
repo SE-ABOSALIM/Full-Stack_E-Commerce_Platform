@@ -30,7 +30,12 @@ def backend(tmp_path_factory):
             "language": "tr",
         }
         patch.setattr(main, "twilio_sms_service", sms)
-        patch.setattr(main, "email_service", Mock())
+        patch.setattr(main.user_routes, "twilio_sms_service", sms)
+        patch.setattr(main.verification_routes, "twilio_sms_service", sms)
+        patch.setattr("app.services.verification.twilio_sms_service", sms)
+        email = Mock()
+        patch.setattr(main, "email_service", email)
+        patch.setattr(main.verification_routes, "email_service", email)
         yield main
         main.engine.dispose()
         for name in list(sys.modules):

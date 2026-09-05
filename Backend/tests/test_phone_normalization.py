@@ -45,9 +45,9 @@ def test_explicit_international_number_remains_supported(backend):
 def test_user_signup_otp_and_uniqueness_share_canonical_identity(
     client, backend, db, monkeypatch
 ):
-    monkeypatch.setattr(backend, "generate_verification_code", lambda: "123456")
+    monkeypatch.setattr(backend.verification_routes, "generate_verification_code", lambda: "123456")
     sms = Mock(return_value=True)
-    monkeypatch.setattr(backend, "send_sms_verification", sms)
+    monkeypatch.setattr(backend.verification_routes, "send_sms_verification", sms)
 
     response = client.post(
         "/send-verification-code",
@@ -92,8 +92,8 @@ def test_user_signup_otp_and_uniqueness_share_canonical_identity(
 def test_seller_signup_otp_and_uniqueness_share_canonical_identity(
     client, backend, db, monkeypatch
 ):
-    monkeypatch.setattr(backend, "generate_verification_code", lambda: "654321")
-    monkeypatch.setattr(backend, "send_sms_verification", Mock(return_value=True))
+    monkeypatch.setattr(backend.verification_routes, "generate_verification_code", lambda: "654321")
+    monkeypatch.setattr(backend.verification_routes, "send_sms_verification", Mock(return_value=True))
 
     response = client.post(
         "/send-seller-verification-code",
@@ -154,7 +154,7 @@ def test_user_profile_formatting_only_change_preserves_verification(
     db.commit()
     headers = auth_headers(user)
     sms = Mock(return_value=True)
-    monkeypatch.setattr(backend, "send_sms_verification", sms)
+    monkeypatch.setattr(backend.user_routes, "send_sms_verification", sms)
 
     response = client.put(
         "/users/me",
@@ -208,7 +208,7 @@ def test_seller_profile_compares_canonical_phone_identity(
     db.refresh(seller)
     headers = auth_headers(seller, role="seller")
     sms = Mock(return_value=True)
-    monkeypatch.setattr(backend, "send_sms_verification", sms)
+    monkeypatch.setattr(backend.seller_routes, "send_sms_verification", sms)
 
     response = client.put(
         "/sellers/profile", headers=headers, data={"phone": "05556667711"}
@@ -244,7 +244,7 @@ def test_password_reset_request_and_reset_accept_equivalent_formats(
     db.add(user)
     db.commit()
     sms = Mock(return_value=True)
-    monkeypatch.setattr(backend, "send_sms_verification", sms)
+    monkeypatch.setattr(backend.verification_routes, "send_sms_verification", sms)
 
     response = client.post(
         "/auth/forgot-password/request", json={"phone_number": "0555 666 77 11"}
